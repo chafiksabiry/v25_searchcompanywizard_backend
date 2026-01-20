@@ -41,6 +41,11 @@ app.get('/api/health', (req: any, res: { status: (arg0: number) => { (): any; ne
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Root route for simple connectivity check
+app.get('/', (req, res) => {
+  res.status(200).send('Company Profile Backend API Running');
+});
+
 // Routes
 app.use('/api/companies', companyRoutes);
 app.use('/api/onboarding', onboardingProgressRoutes);
