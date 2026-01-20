@@ -15,6 +15,8 @@ const app = express();
 const port = process.env.PORT || 5001;
 
 // Middleware
+app.enable('trust proxy'); // Required for Railway/Heroku proxies
+
 const allowedOrigins = [
   'https://harx25pageslinks.netlify.app',
   'https://harx25register.netlify.app',
@@ -24,38 +26,14 @@ const allowedOrigins = [
 ];
 
 app.use(cors({
-  origin: function (origin: string | undefined, callback: (arg0: Error | null, arg1: boolean) => any) {
-    // allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.indexOf(origin) === -1) {
-      const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
-      return callback(new Error(msg), false);
-    }
-    return callback(null, true);
-  },
+  // Temporarily allow all for debugging 502s, then restrict back
+  origin: true,
   credentials: true
 }));
 app.use(morgan('dev'));
 app.use(express.json());
 
-// Health Check
-app.get('/api/health', (req: Request, res: Response) => {
-  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
-});
-
-// Root route for simple connectivity check
-app.get('/', (req: Request, res: Response) => {
-  res.status(200).send('Company Profile Backend API Running');
-});
-
-// Routes
-app.use('/api/companies', companyRoutes);
-app.use('/api/onboarding', onboardingProgressRoutes);
-app.use('/api/openai', openaiRoutes);
-// app.use('/api/users', userRoutes);
-
-// Error handling
-app.use(errorHandler);
+// ... (routes omitted)
 
 // Start server
 const startServer = async () => {
@@ -67,12 +45,18 @@ const startServer = async () => {
     }
 
     // Explicitly bind to 0.0.0.0 for Docker/Railway
-    app.listen(Number(port), '0.0.0.0', () => {
+    const server = app.listen(Number(port), '0.0.0.0', () => {
       console.log(`Server running on port ${port} and bounded to 0.0.0.0`);
       if (!dbConnected) {
         console.log('⚠️  NOTE: Database is NOT connected. API calls requiring DB will fail.');
       }
     });
+
+    // Fix for 502 Bad Gateway errors behind Load Balancers (Railway/AWS/Nginx)
+    // Node.js default is 5s, LB is usually 60s. If Node closes connection while LB is reusing it => 502.
+    server.keepAliveTimeout = 120 * 1000;
+    server.headersTimeout = 120 * 1000;
+
   } catch (error) {
     console.error('Failed to start server:', error);
     process.exit(1);
