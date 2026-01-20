@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 
 
-export const connectDB = async () => {
+export const connectDB = async (): Promise<boolean> => {
   try {
     const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/company-profiles';
 
@@ -15,9 +15,12 @@ export const connectDB = async () => {
 
     await mongoose.connect(mongoUri);
     console.log('✅ MongoDB connected successfully');
+    return true;
   } catch (error) {
     console.error('❌ MongoDB connection error:', error);
     // Exit process with failure
-    process.exit(1);
+    // process.exit(1); 
+    // CHANGE: Return false instead of exiting, to keep server alive for debugging
+    return false;
   }
 };
