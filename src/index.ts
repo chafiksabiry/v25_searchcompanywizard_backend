@@ -33,7 +33,10 @@ app.use(cors({
 app.use(morgan('dev'));
 app.use(express.json());
 
-// ... (routes omitted)
+// Routes
+app.use('/api/companies', companyRoutes);
+app.use('/api/openai', openaiRoutes);
+app.use('/api/onboarding', onboardingProgressRoutes);
 
 // Start server
 const startServer = async () => {
