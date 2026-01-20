@@ -53,9 +53,17 @@ app.use(errorHandler);
 // Start server
 const startServer = async () => {
   try {
-    await connectDB();
+    const dbConnected = await connectDB();
+
+    if (!dbConnected) {
+      console.warn('⚠️  Server starting WITHOUT Database connection.');
+    }
+
     app.listen(port, () => {
       console.log(`Server running on port  ${port}`);
+      if (!dbConnected) {
+        console.log('⚠️  NOTE: Database is NOT connected. API calls requiring DB will fail.');
+      }
     });
   } catch (error) {
     console.error('Failed to start server:', error);
