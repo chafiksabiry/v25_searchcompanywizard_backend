@@ -9,6 +9,8 @@ import { onboardingProgressRoutes } from './infrastructure/routes/onboardingProg
 import { openaiRoutes } from './infrastructure/routes/openaiRoutes';
 // import { userRoutes } from './infrastructure/routes/userRoutes';
 
+import { Request, Response } from 'express';
+
 const app = express();
 const port = process.env.PORT || 5001;
 
@@ -22,7 +24,7 @@ const allowedOrigins = [
 ];
 
 app.use(cors({
-  origin: function (origin: string, callback: (arg0: Error | null, arg1: boolean) => any) {
+  origin: function (origin: string | undefined, callback: (arg0: Error | null, arg1: boolean) => any) {
     // allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
     if (allowedOrigins.indexOf(origin) === -1) {
@@ -37,12 +39,12 @@ app.use(morgan('dev'));
 app.use(express.json());
 
 // Health Check
-app.get('/api/health', (req: any, res: { status: (arg0: number) => { (): any; new(): any; json: { (arg0: { status: string; timestamp: string; }): void; new(): any; }; }; }) => {
+app.get('/api/health', (req: Request, res: Response) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 // Root route for simple connectivity check
-app.get('/', (req, res) => {
+app.get('/', (req: Request, res: Response) => {
   res.status(200).send('Company Profile Backend API Running');
 });
 
