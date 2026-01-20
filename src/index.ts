@@ -66,8 +66,9 @@ const startServer = async () => {
       console.warn('⚠️  Server starting WITHOUT Database connection.');
     }
 
-    app.listen(port, () => {
-      console.log(`Server running on port  ${port}`);
+    // Explicitly bind to 0.0.0.0 for Docker/Railway
+    app.listen(Number(port), '0.0.0.0', () => {
+      console.log(`Server running on port ${port} and bounded to 0.0.0.0`);
       if (!dbConnected) {
         console.log('⚠️  NOTE: Database is NOT connected. API calls requiring DB will fail.');
       }
