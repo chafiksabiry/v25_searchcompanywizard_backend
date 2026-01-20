@@ -22,7 +22,7 @@ const allowedOrigins = [
 ];
 
 app.use(cors({
-  origin: function (origin, callback) {
+  origin: function (origin: string, callback: (arg0: Error | null, arg1: boolean) => any) {
     // allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
     if (allowedOrigins.indexOf(origin) === -1) {
@@ -37,7 +37,7 @@ app.use(morgan('dev'));
 app.use(express.json());
 
 // Health Check
-app.get('/api/health', (req, res) => {
+app.get('/api/health', (req: any, res: { status: (arg0: number) => { (): any; new(): any; json: { (arg0: { status: string; timestamp: string; }): void; new(): any; }; }; }) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
