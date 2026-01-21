@@ -11,15 +11,15 @@ export class OnboardingProgressController {
     try {
       const { companyId } = req.params;
       console.log('companyId reçu:', companyId);
-      
+
       // Convertir en ObjectId
       const companyObjectId = new Types.ObjectId(companyId);
       console.log('companyObjectId:', companyObjectId.toString());
-      
+
       // Vérifier si un progrès existe déjà pour cette company
       const existingProgress = await OnboardingProgress.findOne({ companyId: companyObjectId });
       console.log('Progrès existant trouvé:', existingProgress);
-      
+
       if (existingProgress) {
         return res.status(400).json({ message: 'Onboarding progress already exists for this company' });
       }
@@ -30,24 +30,24 @@ export class OnboardingProgressController {
         currentPhase: 1,
         completedSteps: [1],
         phases: [
-          { 
-            id: 1, 
-            status: 'in_progress', 
+          {
+            id: 1,
+            status: 'in_progress',
             steps: [
               { id: 1, status: 'completed', completedAt: new Date() },
               { id: 2, status: 'pending', disabled: true },
               { id: 3, status: 'pending' }
             ]
           },
-          { id: 2, status: 'pending', steps: Array.from({length: 6}, (_, i) => ({ id: i + 4, status: 'pending' })) },
-          { id: 3, status: 'pending', steps: Array.from({length: 3}, (_, i) => ({ id: i + 10, status: 'pending' })) },
+          { id: 2, status: 'pending', steps: Array.from({ length: 6 }, (_, i) => ({ id: i + 4, status: 'pending' })) },
+          { id: 3, status: 'pending', steps: Array.from({ length: 3 }, (_, i) => ({ id: i + 10, status: 'pending' })) },
           { id: 4, status: 'pending', steps: [{ id: 13, status: 'pending' }] }
         ]
       });
 
       const savedProgress = await initialProgress.save();
       console.log('Nouveau progrès sauvegardé:', savedProgress);
-      
+
       res.status(201).json(savedProgress);
     } catch (error) {
       console.error('Erreur lors de l\'initialisation:', error);
@@ -60,8 +60,13 @@ export class OnboardingProgressController {
     try {
       const { companyId } = req.params;
       console.log('companyId reçu:', companyId);
-      const progress = await OnboardingProgress.findOne({ companyId });
-      
+
+      // Convertir en ObjectId pour la requête MongoDB
+      const companyObjectId = new Types.ObjectId(companyId);
+      console.log('companyObjectId:', companyObjectId.toString());
+
+      const progress = await OnboardingProgress.findOne({ companyId: companyObjectId });
+
       if (!progress) {
         return res.status(404).json({ message: 'Onboarding progress not found' });
       }
@@ -102,10 +107,10 @@ export class OnboardingProgressController {
         const previousPhases = progress.phases.filter(p => p.id < parseInt(phaseId));
         // Filtrer pour ne garder que les phases non complétées
         const incompletePreviousPhases = previousPhases.filter(p => p.status !== 'completed');
-        
+
         // Si des phases précédentes ne sont pas complétées, refuser la modification
         if (incompletePreviousPhases.length > 0) {
-          return res.status(400).json({ 
+          return res.status(400).json({
             message: 'Cannot modify steps in phase ' + phaseId + ' because previous phases are not completed',
             incompletePhases: incompletePreviousPhases.map(p => p.id)
           });
@@ -113,7 +118,7 @@ export class OnboardingProgressController {
       }
 
       step.status = status;
-      
+
       // Gérer l'ajout/retrait du step de la liste completedSteps
       if (status === 'completed') {
         step.completedAt = new Date();
@@ -122,9 +127,9 @@ export class OnboardingProgressController {
         }
 
         // Trouver le prochain step disponible dans la phase courante
-        const nextStep = phase.steps.find(s => 
-          s.id > parseInt(stepId) && 
-          !s.disabled && 
+        const nextStep = phase.steps.find(s =>
+          s.id > parseInt(stepId) &&
+          !s.disabled &&
           s.status !== 'completed'
         );
 
@@ -156,7 +161,7 @@ export class OnboardingProgressController {
 
       // Mettre à jour le statut de la phase
       const activeSteps = phase.steps.filter(s => !s.disabled);
-      
+
       // Logique spéciale pour la Phase 2 : complétée quand tous les steps sauf le step 9 sont complétés
       if (phase.id === 2) {
         const stepsWithoutStep9 = activeSteps.filter(s => s.id !== 9);
@@ -186,11 +191,11 @@ export class OnboardingProgressController {
       }
 
       // Calculer automatiquement la phase courante basée sur l'état réel
-      const currentActivePhase = progress.phases.find(p => 
-        p.status === 'in_progress' || 
+      const currentActivePhase = progress.phases.find(p =>
+        p.status === 'in_progress' ||
         (p.status === 'pending' && p.steps.some(s => s.status === 'in_progress'))
       );
-      
+
       if (currentActivePhase) {
         progress.currentPhase = currentActivePhase.id;
       }
@@ -222,10 +227,10 @@ export class OnboardingProgressController {
         const previousPhases = progress.phases.filter(p => p.id < phase);
         // Filtrer pour ne garder que les phases non complétées
         const incompletePreviousPhases = previousPhases.filter(p => p.status !== 'completed');
-        
+
         // Si des phases précédentes ne sont pas complétées, refuser l'accès
         if (incompletePreviousPhases.length > 0) {
-          return res.status(400).json({ 
+          return res.status(400).json({
             message: 'Cannot access phase ' + phase + ' because previous phases are not completed',
             incompletePhases: incompletePreviousPhases.map(p => p.id)
           });
@@ -245,16 +250,16 @@ export class OnboardingProgressController {
     try {
       const { companyId } = req.params;
       await OnboardingProgress.findOneAndDelete({ companyId });
-      
+
       // Réinitialiser avec les valeurs par défaut
       const initialProgress = new OnboardingProgress({
         companyId,
         currentPhase: 1,
         completedSteps: [],
         phases: [
-          { id: 1, status: 'in_progress', steps: Array.from({length: 3}, (_, i) => ({ id: i + 1, status: 'pending' })) },
-          { id: 2, status: 'pending', steps: Array.from({length: 6}, (_, i) => ({ id: i + 4, status: 'pending' })) },
-          { id: 3, status: 'pending', steps: Array.from({length: 3}, (_, i) => ({ id: i + 10, status: 'pending' })) },
+          { id: 1, status: 'in_progress', steps: Array.from({ length: 3 }, (_, i) => ({ id: i + 1, status: 'pending' })) },
+          { id: 2, status: 'pending', steps: Array.from({ length: 6 }, (_, i) => ({ id: i + 4, status: 'pending' })) },
+          { id: 3, status: 'pending', steps: Array.from({ length: 3 }, (_, i) => ({ id: i + 10, status: 'pending' })) },
           { id: 4, status: 'pending', steps: [{ id: 13, status: 'pending' }] }
         ]
       });
@@ -272,14 +277,14 @@ export class OnboardingProgressController {
       console.log('userId reçu:', userId);
       // Trouver la company associée au userId
       const company = await CompanyModel.findOne({ userId: new mongoose.Types.ObjectId(userId) });
-      
+
       if (!company) {
         return res.status(404).json({ message: 'No company found for this user' });
       }
 
       // Utiliser le companyId pour trouver le progrès d'onboarding
-      const progress = await OnboardingProgress.findOne({ 
-        companyId: company._id 
+      const progress = await OnboardingProgress.findOne({
+        companyId: company._id
       });
 
       if (!progress) {
@@ -298,22 +303,22 @@ export class OnboardingProgressController {
     try {
       const { companyId } = req.params;
       console.log('Fixing current phase for companyId:', companyId);
-      
+
       const progress = await OnboardingProgress.findOne({ companyId });
       if (!progress) {
         return res.status(404).json({ message: 'Onboarding progress not found' });
       }
 
       // Calculer la phase courante basée sur l'état réel
-      const currentActivePhase = progress.phases.find(p => 
-        p.status === 'in_progress' || 
+      const currentActivePhase = progress.phases.find(p =>
+        p.status === 'in_progress' ||
         (p.status === 'pending' && p.steps.some(s => s.status === 'in_progress'))
       );
-      
+
       if (currentActivePhase) {
         progress.currentPhase = currentActivePhase.id;
         await progress.save();
-        
+
         console.log('Current phase fixed to:', currentActivePhase.id);
         res.json({
           message: 'Current phase fixed successfully',
@@ -336,7 +341,7 @@ export class OnboardingProgressController {
     try {
       const { companyId } = req.params;
       console.log('Completing last phase and step for companyId:', companyId);
-      
+
       const progress = await OnboardingProgress.findOne({ companyId });
       if (!progress) {
         return res.status(404).json({ message: 'Onboarding progress not found' });
@@ -370,7 +375,7 @@ export class OnboardingProgressController {
       progress.currentPhase = lastPhase.id;
 
       await progress.save();
-      
+
       console.log('Last phase and step completed successfully');
       res.json({
         message: 'Last phase and step completed successfully',
