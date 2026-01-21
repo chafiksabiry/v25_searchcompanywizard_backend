@@ -5,17 +5,17 @@ const router = Router();
 const openaiController = new OpenAIController();
 
 // Route pour rechercher le logo d'une entreprise
-router.post('/search-logo', (req, res, next) => {
+router.post('/search-logo', (req: any, res: any, next: any) => {
   openaiController.searchCompanyLogo(req, res, next);
 });
 
 // Route pour générer un profil d'entreprise complet
-router.post('/generate-profile', (req, res, next) => {
+router.post('/generate-profile', (req: any, res: any, next: any) => {
   openaiController.generateCompanyProfile(req, res, next);
 });
 
 // Route pour générer les catégories d'unicité
-router.post('/generate-uniqueness', (req, res, next) => {
+router.post('/generate-uniqueness', (req: any, res: any, next: any) => {
   openaiController.generateUniquenessCategories(req, res, next);
 });
 
