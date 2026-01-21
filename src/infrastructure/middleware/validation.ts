@@ -1,30 +1,32 @@
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 
+const optionalUrl = z.union([z.string().url(), z.literal("")]).optional();
+
 const coordinatesSchema = z.object({
   lat: z.number(),
   lng: z.number()
 }).optional();
 
 const contactSchema = z.object({
-  email: z.string().email().optional(),
+  email: z.union([z.string().email(), z.literal("")]).optional(),
   phone: z.string().optional(),
   address: z.string().optional(),
-  website: z.string().url().optional(),
+  website: optionalUrl,
   coordinates: coordinatesSchema
 });
 
 const socialMediaSchema = z.object({
-  linkedin: z.string().url().optional(),
-  twitter: z.string().url().optional(),
-  facebook: z.union([z.string().url(), z.literal("")]).optional(),
-  instagram: z.union([z.string().url(), z.literal("")]).optional()
+  linkedin: optionalUrl,
+  twitter: optionalUrl,
+  facebook: optionalUrl,
+  instagram: optionalUrl
 });
 
 
 const companySchema = z.object({
   name: z.string().min(1),
-  logo: z.string().url().optional(),
+  logo: optionalUrl,
   industry: z.string().optional(),
   founded: z.string().optional(),
   headquarters: z.string().optional(),
@@ -52,7 +54,7 @@ export const validateCompany = (req: Request, res: Response, next: NextFunction)
   try {
     companySchema.parse(req.body);
     next();
-  } catch (error) {
+  } catch (error: any) {
     if (error instanceof z.ZodError) {
       res.status(400).json({
         message: 'Validation Error',
