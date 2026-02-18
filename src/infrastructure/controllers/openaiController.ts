@@ -61,9 +61,9 @@ interface UniquenessCategory {
 export class OpenAIController {
   async searchCompanyLogo(req: Request, res: Response, next: NextFunction) {
     try {
-      console.log('🔍 [OpenAI] Search Company Logo - Request:', { 
-        companyName: req.body.companyName, 
-        companyWebsite: req.body.companyWebsite 
+      console.log('🔍 [OpenAI] Search Company Logo - Request:', {
+        companyName: req.body.companyName,
+        companyWebsite: req.body.companyWebsite
       });
 
       const { companyName, companyWebsite } = req.body;
@@ -113,10 +113,10 @@ export class OpenAIController {
 
       const content = response.choices[0]?.message?.content;
       const logoUrl = content && !content.toLowerCase().includes('null') ? content.trim() : null;
-      
-      console.log('🎯 [OpenAI] Logo search result:', { 
-        rawContent: content, 
-        finalLogoUrl: logoUrl 
+
+      console.log('🎯 [OpenAI] Logo search result:', {
+        rawContent: content,
+        finalLogoUrl: logoUrl
       });
 
       res.status(200).json({
@@ -131,12 +131,13 @@ export class OpenAIController {
 
   async generateCompanyProfile(req: Request, res: Response, next: NextFunction) {
     try {
-      console.log('🏢 [OpenAI] Generate Company Profile - Request:', { 
-        companyInfo: req.body.companyInfo?.substring(0, 100) + '...', 
-        userId: req.body.userId 
+      console.log('🏢 [OpenAI] Generate Company Profile - Request:', {
+        companyInfo: req.body.companyInfo?.substring(0, 100) + '...',
+        userId: req.body.userId,
+        logoUrl: req.body.logoUrl
       });
 
-      const { companyInfo, userId } = req.body;
+      const { companyInfo, userId, logoUrl } = req.body;
 
       if (!apiKey) {
         console.error('❌ [OpenAI] API key not configured');
@@ -285,6 +286,7 @@ export class OpenAIController {
         userId: userId || '681a91212c1ca099fe2b17df',
         companyIntro: companyIntroResponse,
         ...parsedProfile,
+        logo: logoUrl || parsedProfile.logo, // Use provided logoUrl or fallback to generated one
         culture: {
           ...parsedProfile.culture,
           values: parsedProfile.culture?.values || [],
@@ -362,7 +364,7 @@ export class OpenAIController {
 
   async generateUniquenessCategories(req: Request, res: Response, next: NextFunction) {
     try {
-      console.log('⭐ [OpenAI] Generate Uniqueness Categories - Request:', { 
+      console.log('⭐ [OpenAI] Generate Uniqueness Categories - Request:', {
         companyName: req.body.profile?.name,
         industry: req.body.profile?.industry
       });
