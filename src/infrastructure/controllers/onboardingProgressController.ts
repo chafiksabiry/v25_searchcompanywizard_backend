@@ -32,47 +32,16 @@ export class OnboardingProgressController {
         phases: [
           {
             id: 1,
-            status: 'completed',
+            status: 'in_progress',
             steps: [
               { id: 1, status: 'completed', completedAt: new Date() },
-              { id: 2, status: 'pending', disabled: true }
+              { id: 2, status: 'pending', disabled: true },
+              { id: 3, status: 'pending' }
             ]
           },
-          {
-            id: 2,
-            status: 'pending',
-            steps: [
-              { id: 4, status: 'pending' },
-              { id: 5, status: 'pending' },
-              { id: 6, status: 'pending' },
-              { id: 8, status: 'pending' },
-              { id: 9, status: 'pending', disabled: true }
-            ]
-          },
-          {
-            id: 3,
-            status: 'pending',
-            steps: [
-              { id: 7, status: 'pending' },
-              { id: 11, status: 'pending' },
-              { id: 12, status: 'pending' }
-            ]
-          },
-          {
-            id: 4,
-            status: 'pending',
-            steps: [
-              { id: 3, status: 'pending' },
-              { id: 13, status: 'pending' }
-            ]
-          },
-          {
-            id: 5,
-            status: 'pending',
-            steps: [
-              { id: 10, status: 'pending' }
-            ]
-          }
+          { id: 2, status: 'pending', steps: Array.from({ length: 6 }, (_, i) => ({ id: i + 4, status: 'pending' })) },
+          { id: 3, status: 'pending', steps: Array.from({ length: 3 }, (_, i) => ({ id: i + 10, status: 'pending' })) },
+          { id: 4, status: 'pending', steps: [{ id: 13, status: 'pending' }] }
         ]
       });
 
@@ -131,39 +100,19 @@ export class OnboardingProgressController {
       }
 
       // Validation: vérifier que toutes les phases précédentes sont complétées avant de modifier une étape
+      // Cette validation empêche la modification d'étapes dans une phase si les phases précédentes ne sont pas terminées
+      // Par exemple: on ne peut pas modifier les étapes de la phase 4 si les phases 1, 2 ou 3 ne sont pas complétées
       if (parseInt(phaseId) > 1) {
         // Récupérer toutes les phases avec un ID inférieur à la phase de l'étape
         const previousPhases = progress.phases.filter(p => p.id < parseInt(phaseId));
+        // Filtrer pour ne garder que les phases non complétées
+        const incompletePreviousPhases = previousPhases.filter(p => p.status !== 'completed');
 
-        let invalidPhases: number[] = [];
-
-        // Vérifier chaque phase précédente
-        for (const prevPhase of previousPhases) {
-          if (prevPhase.status !== 'completed') {
-            // Vérifier si elle devrait être complétée (tous les steps actifs sont complétés)
-            const activeSteps = prevPhase.steps.filter((s: any) => !s.disabled);
-            const allStepsCompleted = activeSteps.every((s: any) => s.status === 'completed');
-
-            if (allStepsCompleted) {
-              // Auto-fix: marquer comme complétée
-              console.log(`Auto-repair: Marking phase ${prevPhase.id} as completed`);
-              prevPhase.status = 'completed';
-            } else {
-              invalidPhases.push(prevPhase.id);
-            }
-          }
-        }
-
-        // Si des phases sont toujours invalides
-        if (invalidPhases.length > 0) {
-          // Sauvegarder si on a fait des auto-repairs
-          if (previousPhases.some(p => p.status === 'completed' && invalidPhases.indexOf(p.id) === -1)) {
-            await progress.save();
-          }
-
+        // Si des phases précédentes ne sont pas complétées, refuser la modification
+        if (incompletePreviousPhases.length > 0) {
           return res.status(400).json({
             message: 'Cannot modify steps in phase ' + phaseId + ' because previous phases are not completed',
-            incompletePhases: invalidPhases
+            incompletePhases: incompletePreviousPhases.map(p => p.id)
           });
         }
       }
@@ -213,37 +162,43 @@ export class OnboardingProgressController {
       // Mettre à jour le statut de la phase
       const activeSteps = phase.steps.filter(s => !s.disabled);
 
-      // Logique générique pour toutes les phases
-      const allStepsCompleted = activeSteps.every(s => s.status === 'completed');
-      if (allStepsCompleted) {
-        phase.status = 'completed';
-      } else if (activeSteps.some(s => s.status === 'completed' || s.status === 'in_progress')) {
-        phase.status = 'in_progress';
+      // Logique spéciale pour la Phase 2 : complétée quand tous les steps sauf le step 9 sont complétés
+      if (phase.id === 2) {
+        const stepsWithoutStep9 = activeSteps.filter(s => s.id !== 9);
+        const allStepsExceptStep9Completed = stepsWithoutStep9.every(s => s.status === 'completed');
+        if (allStepsExceptStep9Completed) {
+          phase.status = 'completed';
+        } else if (activeSteps.some(s => s.status === 'completed' || s.status === 'in_progress')) {
+          phase.status = 'in_progress';
+        }
+      }
+      // Logique spéciale pour la Phase 3 : complétée dès que le step 10 est complété
+      else if (phase.id === 3) {
+        const step10 = phase.steps.find(s => s.id === 10);
+        if (step10 && step10.status === 'completed') {
+          phase.status = 'completed';
+        } else if (activeSteps.some(s => s.status === 'completed' || s.status === 'in_progress')) {
+          phase.status = 'in_progress';
+        }
+      } else {
+        // Logique normale pour les autres phases
+        const allStepsCompleted = activeSteps.every(s => s.status === 'completed');
+        if (allStepsCompleted) {
+          phase.status = 'completed';
+        } else if (activeSteps.some(s => s.status === 'completed' || s.status === 'in_progress')) {
+          phase.status = 'in_progress';
+        }
       }
 
       // Calculer automatiquement la phase courante basée sur l'état réel
-      let newCurrentPhase = progress.currentPhase;
+      const currentActivePhase = progress.phases.find(p =>
+        p.status === 'in_progress' ||
+        (p.status === 'pending' && p.steps.some(s => s.status === 'in_progress'))
+      );
 
-      // Trouver la première phase non complétée
-      const firstIncompletePhase = progress.phases.find(p => p.status !== 'completed');
-
-      if (firstIncompletePhase) {
-        // Si la phase active est différente de currentPhase, on met à jour
-        // Mais seulement si la phase précédente est complétée (sauf pour phase 1)
-        if (firstIncompletePhase.id === 1) {
-          newCurrentPhase = 1;
-        } else {
-          const prevPhase = progress.phases.find(p => p.id === firstIncompletePhase.id - 1);
-          if (prevPhase && prevPhase.status === 'completed') {
-            newCurrentPhase = firstIncompletePhase.id;
-          }
-        }
-      } else {
-        // Toutes les phases sont complétées
-        newCurrentPhase = progress.phases.length;
+      if (currentActivePhase) {
+        progress.currentPhase = currentActivePhase.id;
       }
-
-      progress.currentPhase = newCurrentPhase;
 
       await progress.save();
       res.json(progress);
@@ -302,36 +257,10 @@ export class OnboardingProgressController {
         currentPhase: 1,
         completedSteps: [],
         phases: [
-          { id: 1, status: 'in_progress', steps: [{ id: 1, status: 'pending' }, { id: 2, status: 'pending', disabled: true }] },
-          {
-            id: 2,
-            status: 'pending',
-            steps: [
-              { id: 4, status: 'pending' },
-              { id: 5, status: 'pending' },
-              { id: 6, status: 'pending' },
-              { id: 8, status: 'pending' },
-              { id: 9, status: 'pending', disabled: true }
-            ]
-          },
-          {
-            id: 3,
-            status: 'pending',
-            steps: [
-              { id: 7, status: 'pending' },
-              { id: 11, status: 'pending' },
-              { id: 12, status: 'pending' }
-            ]
-          },
-          {
-            id: 4,
-            status: 'pending',
-            steps: [
-              { id: 3, status: 'pending' },
-              { id: 13, status: 'pending' }
-            ]
-          },
-          { id: 5, status: 'pending', steps: [{ id: 10, status: 'pending' }] }
+          { id: 1, status: 'in_progress', steps: Array.from({ length: 3 }, (_, i) => ({ id: i + 1, status: 'pending' })) },
+          { id: 2, status: 'pending', steps: Array.from({ length: 6 }, (_, i) => ({ id: i + 4, status: 'pending' })) },
+          { id: 3, status: 'pending', steps: Array.from({ length: 3 }, (_, i) => ({ id: i + 10, status: 'pending' })) },
+          { id: 4, status: 'pending', steps: [{ id: 13, status: 'pending' }] }
         ]
       });
 
