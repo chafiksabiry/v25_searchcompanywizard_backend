@@ -19,21 +19,46 @@ export class CreateCompanyUseCase {
       const companyId = (newCompany as any)._id;
       const initialProgress = new OnboardingProgress({
         companyId: companyId,
-        currentPhase: 1,
+        currentPhase: 2,
         completedSteps: [1], // Step 1 is completed (company profile created)
         phases: [
           {
             id: 1,
-            status: 'in_progress',
+            status: 'completed',
             steps: [
               { id: 1, status: 'completed', completedAt: new Date() },
-              { id: 2, status: 'pending', disabled: true },
-              { id: 3, status: 'pending' }
+              { id: 2, status: 'pending', disabled: true }
             ]
           },
-          { id: 2, status: 'pending', steps: Array.from({ length: 6 }, (_, i) => ({ id: i + 4, status: 'pending' })) },
-          { id: 3, status: 'pending', steps: Array.from({ length: 3 }, (_, i) => ({ id: i + 10, status: 'pending' })) },
-          { id: 4, status: 'pending', steps: [{ id: 13, status: 'pending' }] }
+          {
+            id: 2,
+            status: 'in_progress',
+            steps: [
+              { id: 4, status: 'pending' },
+              { id: 5, status: 'pending' },
+              { id: 6, status: 'pending' },
+              { id: 8, status: 'pending' }, // Call Script
+              { id: 9, status: 'pending' }  // Reporting Setup
+            ]
+          },
+          {
+            id: 3,
+            status: 'pending',
+            steps: [
+              { id: 7, status: 'pending' }, // Knowledge Base
+              { id: 10, status: 'pending' },
+              { id: 11, status: 'pending' },
+              { id: 12, status: 'pending' }
+            ]
+          },
+          {
+            id: 4,
+            status: 'pending',
+            steps: [
+              { id: 3, status: 'pending' }, // Subscription Plan
+              { id: 13, status: 'pending' } // Gig Activation
+            ]
+          }
         ]
       });
 
