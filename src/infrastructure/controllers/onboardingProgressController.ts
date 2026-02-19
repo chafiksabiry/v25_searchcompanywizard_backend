@@ -27,12 +27,12 @@ export class OnboardingProgressController {
       // Créer la structure initiale
       const initialProgress = new OnboardingProgress({
         companyId: companyObjectId,
-        currentPhase: 1,
+        currentPhase: 2, // Start at Phase 2
         completedSteps: [1],
         phases: [
           {
             id: 1,
-            status: 'in_progress',
+            status: 'completed',
             steps: [
               { id: 1, status: 'completed', completedAt: new Date() },
               { id: 2, status: 'pending', disabled: true }
@@ -40,26 +40,33 @@ export class OnboardingProgressController {
           },
           {
             id: 2,
-            status: 'pending',
+            status: 'in_progress',
             steps: [
               { id: 4, status: 'pending' },
               { id: 5, status: 'pending' },
               { id: 6, status: 'pending' },
-              { id: 8, status: 'pending' }, // Call Script
-              { id: 9, status: 'pending' }  // Reporting Setup
+              { id: 8, status: 'pending' },
+              { id: 9, status: 'pending' }
             ]
           },
           {
             id: 3,
             status: 'pending',
             steps: [
-              { id: 7, status: 'pending' }, // Knowledge Base moved here
+              { id: 7, status: 'pending' },
               { id: 10, status: 'pending' },
               { id: 11, status: 'pending' },
               { id: 12, status: 'pending' }
             ]
           },
-          { id: 4, status: 'pending', steps: [{ id: 3, status: 'pending' }, { id: 13, status: 'pending' }] }
+          {
+            id: 4,
+            status: 'pending',
+            steps: [
+              { id: 3, status: 'pending' },
+              { id: 13, status: 'pending' }
+            ]
+          }
         ]
       });
 
@@ -272,32 +279,46 @@ export class OnboardingProgressController {
       // Réinitialiser avec les valeurs par défaut
       const initialProgress = new OnboardingProgress({
         companyId,
-        currentPhase: 1,
-        completedSteps: [],
+        currentPhase: 2, // Start at Phase 2
+        completedSteps: [1],
         phases: [
-          { id: 1, status: 'in_progress', steps: Array.from({ length: 2 }, (_, i) => ({ id: i + 1, status: 'pending' })) },
+          {
+            id: 1,
+            status: 'completed', // Phase 1 completed
+            steps: [
+              { id: 1, status: 'completed', completedAt: new Date() },
+              { id: 2, status: 'pending', disabled: true }
+            ]
+          },
           {
             id: 2,
-            status: 'pending',
+            status: 'in_progress',
             steps: [
               { id: 4, status: 'pending' },
               { id: 5, status: 'pending' },
               { id: 6, status: 'pending' },
-              { id: 8, status: 'pending' }, // Call Script
-              { id: 9, status: 'pending' }  // Reporting Setup
+              { id: 8, status: 'pending' },
+              { id: 9, status: 'pending' }
             ]
           },
           {
             id: 3,
             status: 'pending',
             steps: [
-              { id: 7, status: 'pending' }, // Knowledge Base moved here
+              { id: 7, status: 'pending' },
               { id: 10, status: 'pending' },
               { id: 11, status: 'pending' },
               { id: 12, status: 'pending' }
             ]
           },
-          { id: 4, status: 'pending', steps: [{ id: 3, status: 'pending' }, { id: 13, status: 'pending' }] }
+          {
+            id: 4,
+            status: 'pending',
+            steps: [
+              { id: 3, status: 'pending' },
+              { id: 13, status: 'pending' }
+            ]
+          }
         ]
       });
 
