@@ -32,7 +32,7 @@ export class OnboardingProgressController {
         phases: [
           {
             id: 1,
-            status: 'in_progress',
+            status: 'completed',
             steps: [
               { id: 1, status: 'completed', completedAt: new Date() },
               { id: 2, status: 'pending', disabled: true }
@@ -131,19 +131,39 @@ export class OnboardingProgressController {
       }
 
       // Validation: vérifier que toutes les phases précédentes sont complétées avant de modifier une étape
-      // Cette validation empêche la modification d'étapes dans une phase si les phases précédentes ne sont pas terminées
-      // Par exemple: on ne peut pas modifier les étapes de la phase 4 si les phases 1, 2 ou 3 ne sont pas complétées
       if (parseInt(phaseId) > 1) {
         // Récupérer toutes les phases avec un ID inférieur à la phase de l'étape
         const previousPhases = progress.phases.filter(p => p.id < parseInt(phaseId));
-        // Filtrer pour ne garder que les phases non complétées
-        const incompletePreviousPhases = previousPhases.filter(p => p.status !== 'completed');
 
-        // Si des phases précédentes ne sont pas complétées, refuser la modification
-        if (incompletePreviousPhases.length > 0) {
+        let invalidPhases: number[] = [];
+
+        // Vérifier chaque phase précédente
+        for (const prevPhase of previousPhases) {
+          if (prevPhase.status !== 'completed') {
+            // Vérifier si elle devrait être complétée (tous les steps actifs sont complétés)
+            const activeSteps = prevPhase.steps.filter((s: any) => !s.disabled);
+            const allStepsCompleted = activeSteps.every((s: any) => s.status === 'completed');
+
+            if (allStepsCompleted) {
+              // Auto-fix: marquer comme complétée
+              console.log(`Auto-repair: Marking phase ${prevPhase.id} as completed`);
+              prevPhase.status = 'completed';
+            } else {
+              invalidPhases.push(prevPhase.id);
+            }
+          }
+        }
+
+        // Si des phases sont toujours invalides
+        if (invalidPhases.length > 0) {
+          // Sauvegarder si on a fait des auto-repairs
+          if (previousPhases.some(p => p.status === 'completed' && invalidPhases.indexOf(p.id) === -1)) {
+            await progress.save();
+          }
+
           return res.status(400).json({
             message: 'Cannot modify steps in phase ' + phaseId + ' because previous phases are not completed',
-            incompletePhases: incompletePreviousPhases.map(p => p.id)
+            incompletePhases: invalidPhases
           });
         }
       }
