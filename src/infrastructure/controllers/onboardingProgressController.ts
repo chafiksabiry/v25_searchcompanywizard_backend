@@ -38,8 +38,27 @@ export class OnboardingProgressController {
               { id: 2, status: 'pending', disabled: true }
             ]
           },
-          { id: 2, status: 'pending', steps: Array.from({ length: 6 }, (_, i) => ({ id: i + 4, status: 'pending' })) },
-          { id: 3, status: 'pending', steps: Array.from({ length: 3 }, (_, i) => ({ id: i + 10, status: 'pending' })) },
+          {
+            id: 2,
+            status: 'pending',
+            steps: [
+              { id: 4, status: 'pending' },
+              { id: 5, status: 'pending' },
+              { id: 6, status: 'pending' },
+              { id: 8, status: 'pending' }, // Call Script
+              { id: 9, status: 'pending' }  // Reporting Setup
+            ]
+          },
+          {
+            id: 3,
+            status: 'pending',
+            steps: [
+              { id: 7, status: 'pending' }, // Knowledge Base moved here
+              { id: 10, status: 'pending' },
+              { id: 11, status: 'pending' },
+              { id: 12, status: 'pending' }
+            ]
+          },
           { id: 4, status: 'pending', steps: [{ id: 3, status: 'pending' }, { id: 13, status: 'pending' }] }
         ]
       });
@@ -257,8 +276,27 @@ export class OnboardingProgressController {
         completedSteps: [],
         phases: [
           { id: 1, status: 'in_progress', steps: Array.from({ length: 2 }, (_, i) => ({ id: i + 1, status: 'pending' })) },
-          { id: 2, status: 'pending', steps: Array.from({ length: 6 }, (_, i) => ({ id: i + 4, status: 'pending' })) },
-          { id: 3, status: 'pending', steps: Array.from({ length: 3 }, (_, i) => ({ id: i + 10, status: 'pending' })) },
+          {
+            id: 2,
+            status: 'pending',
+            steps: [
+              { id: 4, status: 'pending' },
+              { id: 5, status: 'pending' },
+              { id: 6, status: 'pending' },
+              { id: 8, status: 'pending' }, // Call Script
+              { id: 9, status: 'pending' }  // Reporting Setup
+            ]
+          },
+          {
+            id: 3,
+            status: 'pending',
+            steps: [
+              { id: 7, status: 'pending' }, // Knowledge Base moved here
+              { id: 10, status: 'pending' },
+              { id: 11, status: 'pending' },
+              { id: 12, status: 'pending' }
+            ]
+          },
           { id: 4, status: 'pending', steps: [{ id: 3, status: 'pending' }, { id: 13, status: 'pending' }] }
         ]
       });
