@@ -54,7 +54,6 @@ export class OnboardingProgressController {
             status: 'pending',
             steps: [
               { id: 7, status: 'pending' },
-              { id: 10, status: 'pending' },
               { id: 11, status: 'pending' },
               { id: 12, status: 'pending' }
             ]
@@ -64,7 +63,8 @@ export class OnboardingProgressController {
             status: 'pending',
             steps: [
               { id: 3, status: 'pending' },
-              { id: 13, status: 'pending' }
+              { id: 13, status: 'pending' },
+              { id: 10, status: 'pending' }
             ]
           }
         ]
@@ -199,7 +199,7 @@ export class OnboardingProgressController {
       }
       // Logique spéciale pour la Phase 3 : complétée quand les étapes clés (KB, Matching, Training) sont complétées
       else if (phase.id === 3) {
-        const keySteps = [7, 10, 11];
+        const keySteps = [7, 11];
         const allKeyStepsCompleted = keySteps.every(id => {
           const s = phase.steps.find(step => step.id === id);
           return s && s.status === 'completed';
@@ -311,7 +311,6 @@ export class OnboardingProgressController {
             status: 'pending',
             steps: [
               { id: 7, status: 'pending' },
-              { id: 10, status: 'pending' },
               { id: 11, status: 'pending' },
               { id: 12, status: 'pending' }
             ]
@@ -321,7 +320,8 @@ export class OnboardingProgressController {
             status: 'pending',
             steps: [
               { id: 3, status: 'pending' },
-              { id: 13, status: 'pending' }
+              { id: 13, status: 'pending' },
+              { id: 10, status: 'pending' }
             ]
           }
         ]
