@@ -197,10 +197,15 @@ export class OnboardingProgressController {
           phase.status = 'in_progress';
         }
       }
-      // Logique spéciale pour la Phase 3 : complétée dès que le step 10 est complété
+      // Logique spéciale pour la Phase 3 : complétée quand les étapes clés (KB, Matching, Training) sont complétées
       else if (phase.id === 3) {
-        const step10 = phase.steps.find(s => s.id === 10);
-        if (step10 && step10.status === 'completed') {
+        const keySteps = [7, 10, 11];
+        const allKeyStepsCompleted = keySteps.every(id => {
+          const s = phase.steps.find(step => step.id === id);
+          return s && s.status === 'completed';
+        });
+
+        if (allKeyStepsCompleted) {
           phase.status = 'completed';
         } else if (activeSteps.some(s => s.status === 'completed' || s.status === 'in_progress')) {
           phase.status = 'in_progress';
