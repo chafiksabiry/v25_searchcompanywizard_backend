@@ -152,8 +152,8 @@ export class OnboardingProgressController {
         }
 
         // Trouver le prochain step disponible dans la phase courante
-        const nextStep = phase.steps.find(s =>
-          s.id > parseInt(stepId) &&
+        const currentStepIndex = phase.steps.findIndex(s => s.id === parseInt(stepId));
+        const nextStep = phase.steps.slice(currentStepIndex + 1).find(s =>
           !s.disabled &&
           s.status !== 'completed'
         );
