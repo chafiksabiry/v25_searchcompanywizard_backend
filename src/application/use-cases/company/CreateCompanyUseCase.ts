@@ -19,12 +19,12 @@ export class CreateCompanyUseCase {
       const companyId = (newCompany as any)._id;
       const initialProgress = new OnboardingProgress({
         companyId: companyId,
-        currentPhase: 1,
-        completedSteps: [1], // Step 1 is completed (company profile created)
+        currentPhase: 2,
+        completedSteps: [1], // Step 1 completed (company profile created), Phase 1 marked complete
         phases: [
           {
             id: 1,
-            status: 'in_progress',
+            status: 'completed',
             steps: [
               { id: 1, status: 'completed', completedAt: new Date() },
               { id: 2, status: 'pending' }
@@ -32,7 +32,7 @@ export class CreateCompanyUseCase {
           },
           {
             id: 2,
-            status: 'pending',
+            status: 'in_progress',
             steps: [
               { id: 3, status: 'pending' },
               { id: 4, status: 'pending' },
