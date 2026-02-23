@@ -203,7 +203,7 @@ export class OnboardingProgressController {
       }
 
       // Mettre à jour le statut de la phase
-      const activeSteps = phase.steps.filter((s: { disabled: any; }) => !s.disabled);
+      const activeSteps = phase.steps.filter(s => !s.disabled);
 
       // Phase 2 : complétée dès que les étapes 3, 4, 5, 6 sont toutes complétées
       // L'étape 7 (Reporting Setup) n'est pas bloquante pour la complétion de la phase 2
