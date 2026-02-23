@@ -96,6 +96,24 @@ export class OnboardingProgressController {
         return res.status(404).json({ message: 'Onboarding progress not found' });
       }
 
+      // Rebuild completedSteps from phases data to ensure consistency
+      const computedCompletedSteps: number[] = [];
+      for (const phase of progress.phases) {
+        for (const step of phase.steps) {
+          if (step.status === 'completed' && !computedCompletedSteps.includes(step.id)) {
+            computedCompletedSteps.push(step.id);
+          }
+        }
+      }
+
+      // Update in DB if out of sync
+      const sortedComputed = [...computedCompletedSteps].sort((a, b) => a - b);
+      const sortedCurrent = [...progress.completedSteps].sort((a, b) => a - b);
+      if (JSON.stringify(sortedComputed) !== JSON.stringify(sortedCurrent)) {
+        progress.completedSteps = computedCompletedSteps;
+        await progress.save();
+      }
+
       res.json(progress);
     } catch (error) {
       res.status(500).json({ message: 'Error fetching onboarding progress', error });
