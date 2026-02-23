@@ -203,11 +203,21 @@ export class OnboardingProgressController {
       }
 
       // Mettre à jour le statut de la phase
-      const activeSteps = phase.steps.filter(s => !s.disabled);
+      const activeSteps = phase.steps.filter((s: { disabled: any; }) => !s.disabled);
 
-      // Logique universelle : une phase est complétée quand toutes ses étapes actives sont complétées
-      // On peut ajouter des exceptions ici si certaines étapes ne sont pas bloquantes
-      const allStepsCompleted = activeSteps.every(s => s.status === 'completed');
+      // Phase 2 : complétée dès que les étapes 3, 4, 5, 6 sont toutes complétées
+      // L'étape 7 (Reporting Setup) n'est pas bloquante pour la complétion de la phase 2
+      let allStepsCompleted: boolean;
+      if (phase.id === 2) {
+        const requiredStepIds = [3, 4, 5, 6];
+        allStepsCompleted = requiredStepIds.every(reqId =>
+          phase.steps.find(s => s.id === reqId)?.status === 'completed'
+        );
+      } else {
+        // Logique par défaut : toutes les étapes actives doivent être complétées
+        allStepsCompleted = activeSteps.every(s => s.status === 'completed');
+      }
+
       if (allStepsCompleted) {
         phase.status = 'completed';
       } else if (activeSteps.some(s => s.status === 'completed' || s.status === 'in_progress')) {
@@ -241,6 +251,19 @@ export class OnboardingProgressController {
       const progress = await OnboardingProgress.findOne({ companyId });
       if (!progress) {
         return res.status(404).json({ message: 'Onboarding progress not found' });
+      }
+
+      // Avant de vérifier, recalculer le statut de la Phase 2 si nécessaire
+      // Phase 2 est complétée dès que les étapes 3, 4, 5, 6 sont toutes complétées (étape 7 non bloquante)
+      const phase2 = progress.phases.find(p => p.id === 2);
+      if (phase2 && phase2.status !== 'completed') {
+        const requiredStepIds = [3, 4, 5, 6];
+        const phase2Done = requiredStepIds.every(reqId =>
+          phase2.steps.find(s => s.id === reqId)?.status === 'completed'
+        );
+        if (phase2Done) {
+          phase2.status = 'completed';
+        }
       }
 
       // Validation: vérifier que toutes les phases précédentes sont complétées
