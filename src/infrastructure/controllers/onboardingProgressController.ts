@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { OnboardingProgress, IOnboardingProgress } from '../models/onboardingProgress';
+import { OnboardingProgress, IOnboardingProgress, Step, Phase } from '../models/onboardingProgress';
 import { Types } from 'mongoose';
 import type { HydratedDocument } from 'mongoose';
 import { CompanyModel } from '../database/models/CompanyModel';
@@ -132,12 +132,12 @@ export class OnboardingProgressController {
       }
 
       // Mettre à jour le statut de l'étape
-      const phase = progress.phases.find(p => p.id === parseInt(phaseId));
+      const phase = progress.phases.find((p: Phase) => p.id === parseInt(phaseId));
       if (!phase) {
         return res.status(404).json({ message: 'Phase not found' });
       }
 
-      const step = phase.steps.find(s => s.id === parseInt(stepId));
+      const step = phase.steps.find((s: Step) => s.id === parseInt(stepId));
       if (!step) {
         return res.status(404).json({ message: 'Step not found' });
       }
@@ -147,9 +147,9 @@ export class OnboardingProgressController {
       // Par exemple: on ne peut pas modifier les étapes de la phase 4 si les phases 1, 2 ou 3 ne sont pas complétées
       if (parseInt(phaseId) > 1) {
         // Récupérer toutes les phases avec un ID inférieur à la phase de l'étape
-        const previousPhases = progress.phases.filter(p => p.id < parseInt(phaseId));
+        const previousPhases = progress.phases.filter((p: Phase) => p.id < parseInt(phaseId));
         // Filtrer pour ne garder que les phases non complétées
-        const incompletePreviousPhases = previousPhases.filter(p => p.status !== 'completed');
+        const incompletePreviousPhases = previousPhases.filter((p: Phase) => p.status !== 'completed');
 
         // Si des phases précédentes ne sont pas complétées, refuser la modification
         if (incompletePreviousPhases.length > 0) {
@@ -170,8 +170,8 @@ export class OnboardingProgressController {
         }
 
         // Trouver le prochain step disponible dans la phase courante
-        const currentStepIndex = phase.steps.findIndex(s => s.id === parseInt(stepId));
-        const nextStep = phase.steps.slice(currentStepIndex + 1).find(s =>
+        const currentStepIndex = phase.steps.findIndex((s: Step) => s.id === parseInt(stepId));
+        const nextStep = phase.steps.slice(currentStepIndex + 1).find((s: Step) =>
           !s.disabled &&
           s.status !== 'completed'
         );
@@ -181,9 +181,9 @@ export class OnboardingProgressController {
           nextStep.status = 'in_progress';
         } else {
           // Si pas de prochain step dans la phase courante, chercher dans la phase suivante
-          const nextPhase = progress.phases.find(p => p.id > phase.id);
+          const nextPhase = progress.phases.find((p: Phase) => p.id > phase.id);
           if (nextPhase) {
-            const firstAvailableStep = nextPhase.steps.find(s => !s.disabled && s.status !== 'completed');
+            const firstAvailableStep = nextPhase.steps.find((s: Step) => !s.disabled && s.status !== 'completed');
             if (firstAvailableStep) {
               // Ne pas mettre à jour currentPhase automatiquement - laisser l'utilisateur naviguer manuellement
               // progress.currentPhase = nextPhase.id;
@@ -203,7 +203,7 @@ export class OnboardingProgressController {
       }
 
       // Mettre à jour le statut de la phase
-      const activeSteps = phase.steps.filter((s: { disabled: any; }) => !s.disabled);
+      const activeSteps = phase.steps.filter((s: Step) => !s.disabled);
 
       // Phase 2 : complétée dès que les étapes 3, 4, 5, 6 sont toutes complétées
       // L'étape 7 (Reporting Setup) n'est pas bloquante pour la complétion de la phase 2
@@ -211,23 +211,23 @@ export class OnboardingProgressController {
       if (phase.id === 2) {
         const requiredStepIds = [3, 4, 5, 6];
         allStepsCompleted = requiredStepIds.every(reqId =>
-          phase.steps.find((s: { id: number; }) => s.id === reqId)?.status === 'completed'
+          phase.steps.find((s: Step) => s.id === reqId)?.status === 'completed'
         );
       } else {
         // Logique par défaut : toutes les étapes actives doivent être complétées
-        allStepsCompleted = activeSteps.every(s => s.status === 'completed');
+        allStepsCompleted = activeSteps.every((s: Step) => s.status === 'completed');
       }
 
       if (allStepsCompleted) {
         phase.status = 'completed';
-      } else if (activeSteps.some(s => s.status === 'completed' || s.status === 'in_progress')) {
+      } else if (activeSteps.some((s: Step) => s.status === 'completed' || s.status === 'in_progress')) {
         phase.status = 'in_progress';
       }
 
       // Calculer automatiquement la phase courante basée sur l'état réel
-      const currentActivePhase = progress.phases.find(p =>
+      const currentActivePhase = progress.phases.find((p: Phase) =>
         p.status === 'in_progress' ||
-        (p.status === 'pending' && p.steps.some(s => s.status === 'in_progress'))
+        (p.status === 'pending' && p.steps.some((s: Step) => s.status === 'in_progress'))
       );
 
       if (currentActivePhase) {
@@ -255,11 +255,11 @@ export class OnboardingProgressController {
 
       // Avant de vérifier, recalculer le statut de la Phase 2 si nécessaire
       // Phase 2 est complétée dès que les étapes 3, 4, 5, 6 sont toutes complétées (étape 7 non bloquante)
-      const phase2 = progress.phases.find(p => p.id === 2);
+      const phase2 = progress.phases.find((p: Phase) => p.id === 2);
       if (phase2 && phase2.status !== 'completed') {
         const requiredStepIds = [3, 4, 5, 6];
         const phase2Done = requiredStepIds.every(reqId =>
-          phase2.steps.find(s => s.id === reqId)?.status === 'completed'
+          phase2.steps.find((s: Step) => s.id === reqId)?.status === 'completed'
         );
         if (phase2Done) {
           phase2.status = 'completed';
@@ -271,9 +271,9 @@ export class OnboardingProgressController {
       // Par exemple: on ne peut pas accéder à la phase 4 si les phases 1, 2 ou 3 ne sont pas complétées
       if (phase > 1) {
         // Récupérer toutes les phases avec un ID inférieur à la phase demandée
-        const previousPhases = progress.phases.filter(p => p.id < phase);
+        const previousPhases = progress.phases.filter((p: Phase) => p.id < phase);
         // Filtrer pour ne garder que les phases non complétées
-        const incompletePreviousPhases = previousPhases.filter(p => p.status !== 'completed');
+        const incompletePreviousPhases = previousPhases.filter((p: Phase) => p.status !== 'completed');
 
         // Si des phases précédentes ne sont pas complétées, refuser l'accès
         if (incompletePreviousPhases.length > 0) {
@@ -390,9 +390,9 @@ export class OnboardingProgressController {
       }
 
       // Calculer la phase courante basée sur l'état réel
-      const currentActivePhase = progress.phases.find(p =>
+      const currentActivePhase = progress.phases.find((p: Phase) =>
         p.status === 'in_progress' ||
-        (p.status === 'pending' && p.steps.some(s => s.status === 'in_progress'))
+        (p.status === 'pending' && p.steps.some((s: Step) => s.status === 'in_progress'))
       );
 
       if (currentActivePhase) {

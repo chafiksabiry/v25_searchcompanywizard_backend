@@ -1,13 +1,13 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
-interface Step {
+export interface Step {
   id: number;
   status: 'pending' | 'in_progress' | 'completed';
   completedAt?: Date;
   disabled?: boolean;
 }
 
-interface Phase {
+export interface Phase {
   id: number;
   status: 'pending' | 'in_progress' | 'completed';
   steps: Step[];
@@ -60,7 +60,7 @@ const OnboardingProgressSchema: Schema = new Schema({
 });
 
 // Middleware pour mettre à jour la date de modification
-OnboardingProgressSchema.pre('save', function(next) {
+OnboardingProgressSchema.pre('save', function (next: () => void) {
   this.updatedAt = new Date();
   next();
 });
