@@ -449,4 +449,4 @@ export class OnboardingProgressController {
       res.status(500).json({ message: 'Error completing last phase and step', error });
     }
   }
-} 
+}
