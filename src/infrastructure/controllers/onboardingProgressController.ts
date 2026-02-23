@@ -27,44 +27,44 @@ export class OnboardingProgressController {
       // Créer la structure initiale
       const initialProgress = new OnboardingProgress({
         companyId: companyObjectId,
-        currentPhase: 2, // Start at Phase 2
-        completedSteps: [1],
+        currentPhase: 1, // Start at Phase 1
+        completedSteps: [],
         phases: [
           {
             id: 1,
-            status: 'completed',
+            status: 'in_progress',
             steps: [
-              { id: 1, status: 'completed', completedAt: new Date() },
-              { id: 2, status: 'pending', disabled: true }
+              { id: 1, status: 'pending' },
+              { id: 2, status: 'pending' }
             ]
           },
           {
             id: 2,
-            status: 'in_progress',
+            status: 'pending',
             steps: [
+              { id: 3, status: 'pending' },
               { id: 4, status: 'pending' },
               { id: 5, status: 'pending' },
               { id: 6, status: 'pending' },
-              { id: 8, status: 'pending' },
-              { id: 9, status: 'pending' }
+              { id: 7, status: 'pending' }
             ]
           },
           {
             id: 3,
             status: 'pending',
             steps: [
-              { id: 7, status: 'pending' },
-              { id: 11, status: 'pending' },
-              { id: 12, status: 'pending' }
+              { id: 8, status: 'pending' },
+              { id: 9, status: 'pending' },
+              { id: 10, status: 'pending' }
             ]
           },
           {
             id: 4,
             status: 'pending',
             steps: [
-              { id: 3, status: 'pending' },
-              { id: 13, status: 'pending' },
-              { id: 10, status: 'pending' }
+              { id: 11, status: 'pending' },
+              { id: 12, status: 'pending' },
+              { id: 13, status: 'pending' }
             ]
           }
         ]
@@ -187,37 +187,13 @@ export class OnboardingProgressController {
       // Mettre à jour le statut de la phase
       const activeSteps = phase.steps.filter(s => !s.disabled);
 
-      // Logique spéciale pour la Phase 2 : complétée quand tous les steps sauf le step 9 sont complétés
-      if (phase.id === 2) {
-        const stepsWithoutStep9 = activeSteps.filter(s => s.id !== 9);
-        const allStepsExceptStep9Completed = stepsWithoutStep9.every(s => s.status === 'completed');
-        if (allStepsExceptStep9Completed) {
-          phase.status = 'completed';
-        } else if (activeSteps.some(s => s.status === 'completed' || s.status === 'in_progress')) {
-          phase.status = 'in_progress';
-        }
-      }
-      // Logique spéciale pour la Phase 3 : complétée quand les étapes clés (KB, Matching, Training) sont complétées
-      else if (phase.id === 3) {
-        const keySteps = [7, 11];
-        const allKeyStepsCompleted = keySteps.every(id => {
-          const s = phase.steps.find(step => step.id === id);
-          return s && s.status === 'completed';
-        });
-
-        if (allKeyStepsCompleted) {
-          phase.status = 'completed';
-        } else if (activeSteps.some(s => s.status === 'completed' || s.status === 'in_progress')) {
-          phase.status = 'in_progress';
-        }
-      } else {
-        // Logique normale pour les autres phases
-        const allStepsCompleted = activeSteps.every(s => s.status === 'completed');
-        if (allStepsCompleted) {
-          phase.status = 'completed';
-        } else if (activeSteps.some(s => s.status === 'completed' || s.status === 'in_progress')) {
-          phase.status = 'in_progress';
-        }
+      // Logique universelle : une phase est complétée quand toutes ses étapes actives sont complétées
+      // On peut ajouter des exceptions ici si certaines étapes ne sont pas bloquantes
+      const allStepsCompleted = activeSteps.every(s => s.status === 'completed');
+      if (allStepsCompleted) {
+        phase.status = 'completed';
+      } else if (activeSteps.some(s => s.status === 'completed' || s.status === 'in_progress')) {
+        phase.status = 'in_progress';
       }
 
       // Calculer automatiquement la phase courante basée sur l'état réel
@@ -284,44 +260,44 @@ export class OnboardingProgressController {
       // Réinitialiser avec les valeurs par défaut
       const initialProgress = new OnboardingProgress({
         companyId,
-        currentPhase: 2, // Start at Phase 2
-        completedSteps: [1],
+        currentPhase: 1, // Start at Phase 1
+        completedSteps: [],
         phases: [
           {
             id: 1,
-            status: 'completed', // Phase 1 completed
+            status: 'in_progress',
             steps: [
-              { id: 1, status: 'completed', completedAt: new Date() },
-              { id: 2, status: 'pending', disabled: true }
+              { id: 1, status: 'pending' },
+              { id: 2, status: 'pending' }
             ]
           },
           {
             id: 2,
-            status: 'in_progress',
+            status: 'pending',
             steps: [
+              { id: 3, status: 'pending' },
               { id: 4, status: 'pending' },
               { id: 5, status: 'pending' },
               { id: 6, status: 'pending' },
-              { id: 8, status: 'pending' },
-              { id: 9, status: 'pending' }
+              { id: 7, status: 'pending' }
             ]
           },
           {
             id: 3,
             status: 'pending',
             steps: [
-              { id: 7, status: 'pending' },
-              { id: 11, status: 'pending' },
-              { id: 12, status: 'pending' }
+              { id: 8, status: 'pending' },
+              { id: 9, status: 'pending' },
+              { id: 10, status: 'pending' }
             ]
           },
           {
             id: 4,
             status: 'pending',
             steps: [
-              { id: 3, status: 'pending' },
-              { id: 13, status: 'pending' },
-              { id: 10, status: 'pending' }
+              { id: 11, status: 'pending' },
+              { id: 12, status: 'pending' },
+              { id: 13, status: 'pending' }
             ]
           }
         ]
