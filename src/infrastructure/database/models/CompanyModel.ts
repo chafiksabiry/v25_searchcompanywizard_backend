@@ -45,7 +45,8 @@ const companySchema = new mongoose.Schema({
     twitter: String,
     facebook: String,
     instagram: String
-  }
+  },
+  differentiators: [String]
 }, {
   timestamps: true
 });
