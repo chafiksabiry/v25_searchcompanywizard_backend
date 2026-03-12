@@ -126,7 +126,8 @@ export class OnboardingProgressController {
       const { companyId, phaseId, stepId } = req.params;
       const { status } = req.body;
 
-      const progress = await OnboardingProgress.findOne({ companyId });
+      const companyObjectId = new Types.ObjectId(companyId);
+      const progress = await OnboardingProgress.findOne({ companyId: companyObjectId });
       if (!progress) {
         return res.status(404).json({ message: 'Onboarding progress not found' });
       }
@@ -155,7 +156,7 @@ export class OnboardingProgressController {
         if (incompletePreviousPhases.length > 0) {
           return res.status(400).json({
             message: 'Cannot modify steps in phase ' + phaseId + ' because previous phases are not completed',
-            incompletePhases: incompletePreviousPhases.map(p => p.id)
+            incompletePhases: incompletePreviousPhases.map((p: Phase) => p.id)
           });
         }
       }
@@ -248,7 +249,8 @@ export class OnboardingProgressController {
       const { phase } = req.body;
       console.log('phase reçu:', phase);
       console.log('companyId reçu:', companyId);
-      const progress = await OnboardingProgress.findOne({ companyId });
+      const companyObjectId = new Types.ObjectId(companyId);
+      const progress = await OnboardingProgress.findOne({ companyId: companyObjectId });
       if (!progress) {
         return res.status(404).json({ message: 'Onboarding progress not found' });
       }
@@ -279,7 +281,7 @@ export class OnboardingProgressController {
         if (incompletePreviousPhases.length > 0) {
           return res.status(400).json({
             message: 'Cannot access phase ' + phase + ' because previous phases are not completed',
-            incompletePhases: incompletePreviousPhases.map(p => p.id)
+            incompletePhases: incompletePreviousPhases.map((p: Phase) => p.id)
           });
         }
       }
@@ -296,7 +298,8 @@ export class OnboardingProgressController {
   async resetProgress(req: Request, res: Response) {
     try {
       const { companyId } = req.params;
-      await OnboardingProgress.findOneAndDelete({ companyId });
+      const companyObjectId = new Types.ObjectId(companyId);
+      await OnboardingProgress.findOneAndDelete({ companyId: companyObjectId });
 
       // Réinitialiser avec les valeurs par défaut
       const initialProgress = new OnboardingProgress({
@@ -384,7 +387,8 @@ export class OnboardingProgressController {
       const { companyId } = req.params;
       console.log('Fixing current phase for companyId:', companyId);
 
-      const progress = await OnboardingProgress.findOne({ companyId });
+      const companyObjectId = new Types.ObjectId(companyId);
+      const progress = await OnboardingProgress.findOne({ companyId: companyObjectId });
       if (!progress) {
         return res.status(404).json({ message: 'Onboarding progress not found' });
       }
@@ -422,7 +426,8 @@ export class OnboardingProgressController {
       const { companyId } = req.params;
       console.log('Completing last phase and step for companyId:', companyId);
 
-      const progress = await OnboardingProgress.findOne({ companyId });
+      const companyObjectId = new Types.ObjectId(companyId);
+      const progress = await OnboardingProgress.findOne({ companyId: companyObjectId });
       if (!progress) {
         return res.status(404).json({ message: 'Onboarding progress not found' });
       }

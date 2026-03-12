@@ -38,6 +38,7 @@ export interface Company {
     facebook?: string;
     instagram?: string;
   };
+  differentiators?: string[];
   createdAt?: Date;
   updatedAt?: Date;
 }
