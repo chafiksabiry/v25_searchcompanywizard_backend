@@ -15,6 +15,9 @@ if (!anthropicKey) {
   console.warn('ANTHROPIC_API_KEY is not configured (Fallback AI will not work)');
 }
 
+const anthropicModel = process.env.ANTHROPIC_MODEL || "claude-3-5-haiku-20241022";
+const anthropicMaxTokens = parseInt(process.env.ANTHROPIC_MAX_TOKENS || "4000");
+
 interface CompanyProfile {
   userId: string;
   name: string;
@@ -268,8 +271,8 @@ export class OpenAIController {
         usedFallback = true;
         const anthropic = new Anthropic({ apiKey: anthropicKey });
         const anthropicResponse = await anthropic.messages.create({
-          model: "claude-3-haiku-20240307",
-          max_tokens: 2000,
+          model: anthropicModel,
+          max_tokens: anthropicMaxTokens,
           system: "You are a professional company profiler. Respond ONLY with a valid JSON object matching the requested schema.",
           messages: [{ role: "user", content: `Generate a JSON company profile for: ${companyInfo}` }],
         });
