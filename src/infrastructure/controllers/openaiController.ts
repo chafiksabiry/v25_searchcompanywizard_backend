@@ -320,6 +320,12 @@ export class OpenAIController {
         },
       };
 
+      const company = await CompanyModel.findOneAndUpdate(
+        { userId: finalProfile.userId, name: finalProfile.name },
+        finalProfile,
+        { upsert: true, new: true }
+      );
+
       res.status(200).json({
         success: true,
         data: company,
