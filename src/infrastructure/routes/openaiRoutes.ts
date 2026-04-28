@@ -9,6 +9,11 @@ router.post('/search-logo', (req: any, res: any, next: any) => {
   openaiController.searchCompanyLogo(req, res, next);
 });
 
+// Route pour rechercher des entreprises via Google (Proxy)
+router.post('/search', (req: any, res: any, next: any) => {
+  openaiController.searchCompanies(req, res, next);
+});
+
 // Route pour générer un profil d'entreprise complet
 router.post('/generate-profile', (req: any, res: any, next: any) => {
   openaiController.generateCompanyProfile(req, res, next);

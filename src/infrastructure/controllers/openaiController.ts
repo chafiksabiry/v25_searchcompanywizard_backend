@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import OpenAI from 'openai';
 import { CompanyModel } from '../database/models/CompanyModel';
+import { googleSearchService } from '../services/googleSearchService';
 
 const apiKey = process.env.OPENAI_API_KEY;
 
@@ -59,6 +60,34 @@ interface UniquenessCategory {
 }
 
 export class OpenAIController {
+  async searchCompanies(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { query } = req.body;
+
+      if (!query) {
+        return res.status(400).json({
+          success: false,
+          message: 'Query is required',
+        });
+      }
+
+      console.log(`🔍 [OpenAI] Proxied Google Search for: "${query}"`);
+      const results = await googleSearchService.search(query);
+
+      res.status(200).json({
+        success: true,
+        data: results,
+      });
+    } catch (error: any) {
+      console.error('❌ [OpenAI] Proxy search error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to perform search',
+        error: error.message,
+      });
+    }
+  }
+
   async searchCompanyLogo(req: Request, res: Response, next: NextFunction) {
     try {
       console.log('🔍 [OpenAI] Search Company Logo - Request:', {
