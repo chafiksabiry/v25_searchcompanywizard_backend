@@ -322,7 +322,7 @@ export class OpenAIController {
 
       res.status(200).json({
         success: true,
-        data: finalProfile,
+        data: company,
         provider: usedFallback ? 'anthropic' : 'openai'
       });
     } catch (error: any) {
