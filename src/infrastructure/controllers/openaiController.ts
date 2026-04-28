@@ -1,12 +1,18 @@
 import { Request, Response, NextFunction } from 'express';
 import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
 import { CompanyModel } from '../database/models/CompanyModel';
 import { googleSearchService } from '../services/googleSearchService';
 
 const apiKey = process.env.OPENAI_API_KEY;
+const anthropicKey = process.env.ANTHROPIC_API_KEY;
 
 if (!apiKey) {
   console.error('OPENAI_API_KEY is not configured');
+}
+
+if (!anthropicKey) {
+  console.warn('ANTHROPIC_API_KEY is not configured (Fallback AI will not work)');
 }
 
 interface CompanyProfile {
@@ -184,11 +190,12 @@ export class OpenAIController {
         });
       }
 
-      const openai = new OpenAI({
-        apiKey,
-      });
+      let profileData: any;
+      let usedFallback = false;
 
-      const response = await openai.chat.completions.create({
+      try {
+        const openai = new OpenAI({ apiKey: apiKey! });
+        const response = await openai.chat.completions.create({
         model: "gpt-3.5-turbo-1106",
         response_format: { type: "json_object" },
         messages: [
@@ -250,117 +257,74 @@ export class OpenAIController {
         max_tokens: 1500,
       });
 
-      console.log('✅ [OpenAI] Profile generation response received:', {
-        usage: response.usage,
-        model: response.model,
-        contentLength: response.choices[0]?.message?.content?.length
-      });
+        const content = response.choices[0]?.message?.content;
+        if (!content) throw new Error("OpenAI returned empty content");
+        profileData = JSON.parse(content);
+        console.log('✅ [OpenAI] Profile generated successfully');
+      } catch (error: any) {
+        console.warn('⚠️ [OpenAI] Failed, falling back to Anthropic...', error.message);
+        if (!anthropicKey) throw error;
+        
+        usedFallback = true;
+        const anthropic = new Anthropic({ apiKey: anthropicKey });
+        const anthropicResponse = await anthropic.messages.create({
+          model: "claude-3-haiku-20240307",
+          max_tokens: 2000,
+          system: "You are a professional company profiler. Respond ONLY with a valid JSON object matching the requested schema.",
+          messages: [{ role: "user", content: `Generate a JSON company profile for: ${companyInfo}` }],
+        });
 
-      const content = response.choices[0]?.message?.content;
-      console.log('📄 [OpenAI] Raw profile content:', content);
-
-      if (!content) {
-        console.error('❌ [OpenAI] No content received from OpenAI');
-        throw new Error("No content received from OpenAI");
+        const rawContent = anthropicResponse.content[0].type === 'text' ? anthropicResponse.content[0].text : '';
+        const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
+        profileData = JSON.parse(jsonMatch ? jsonMatch[0] : rawContent);
+        console.log('✅ [Anthropic] Profile generated successfully (Fallback)');
       }
 
-      const parsedProfile = JSON.parse(content) as Omit<CompanyProfile, "userId" | "companyIntro">;
-      console.log('🔍 [OpenAI] Parsed profile structure:', {
-        name: parsedProfile.name,
-        industry: parsedProfile.industry,
-        hasContact: !!parsedProfile.contact,
-        hasCulture: !!parsedProfile.culture,
-        valuesCount: parsedProfile.culture?.values?.length || 0,
-        benefitsCount: parsedProfile.culture?.benefits?.length || 0
-      });
+      console.log('🔍 [AI] Finalizing profile with data from provider...');
 
-      // Generate company intro
-      const companyIntroResponse = await this.generateCompanyIntro({
-        userId: userId || '681a91212c1ca099fe2b17df',
-        ...parsedProfile,
-        culture: {
-          ...parsedProfile.culture,
-          values: parsedProfile.culture?.values || [],
-          benefits: parsedProfile.culture?.benefits || [],
-          workEnvironment: parsedProfile.culture?.workEnvironment || "",
-        },
-        opportunities: {
-          ...parsedProfile.opportunities,
-          roles: parsedProfile.opportunities?.roles || [],
-          growthPotential: parsedProfile.opportunities?.growthPotential || "",
-          training: parsedProfile.opportunities?.training || "",
-        },
-        technology: {
-          ...parsedProfile.technology,
-          stack: parsedProfile.technology?.stack || [],
-          innovation: parsedProfile.technology?.innovation || "",
-        },
-        contact: {
-          ...parsedProfile.contact,
-          email: parsedProfile.contact?.email || "",
-          phone: parsedProfile.contact?.phone || "Téléphone non trouvé - Cliquez pour ajouter manuellement",
-          address: parsedProfile.contact?.address || "",
-          website: parsedProfile.contact?.website || "",
-        },
-        socialMedia: {
-          ...parsedProfile.socialMedia,
-          linkedin: parsedProfile.socialMedia?.linkedin || "",
-          twitter: parsedProfile.socialMedia?.twitter || "",
-          facebook: parsedProfile.socialMedia?.facebook || "",
-          instagram: parsedProfile.socialMedia?.instagram || "",
-        },
-      });
+      console.log('📝 [AI] Skipping company intro generation for now, using default.');
 
       const finalProfile: CompanyProfile = {
         userId: userId || '681a91212c1ca099fe2b17df',
-        companyIntro: companyIntroResponse,
-        ...parsedProfile,
-        logo: logoUrl || parsedProfile.logo, // Use provided logoUrl or fallback to generated one
+        companyIntro: "Généré par AI",
+        ...profileData,
+        logo: logoUrl || profileData.logo,
         culture: {
-          ...parsedProfile.culture,
-          values: parsedProfile.culture?.values || [],
-          benefits: parsedProfile.culture?.benefits || [],
-          workEnvironment: parsedProfile.culture?.workEnvironment || "",
+          values: profileData.culture?.values || [],
+          benefits: profileData.culture?.benefits || [],
+          workEnvironment: profileData.culture?.workEnvironment || "",
         },
         opportunities: {
-          ...parsedProfile.opportunities,
-          roles: parsedProfile.opportunities?.roles || [],
-          growthPotential: parsedProfile.opportunities?.growthPotential || "",
-          training: parsedProfile.opportunities?.training || "",
+          roles: profileData.opportunities?.roles || [],
+          growthPotential: profileData.opportunities?.growthPotential || "",
+          training: profileData.opportunities?.training || "",
         },
         technology: {
-          ...parsedProfile.technology,
-          stack: parsedProfile.technology?.stack || [],
-          innovation: parsedProfile.technology?.innovation || "",
+          stack: profileData.technology?.stack || [],
+          innovation: profileData.technology?.innovation || "",
         },
         contact: {
-          ...parsedProfile.contact,
-          email: parsedProfile.contact?.email || "",
-          phone: parsedProfile.contact?.phone || "Téléphone non trouvé - Cliquez pour ajouter manuellement",
-          address: parsedProfile.contact?.address || "",
-          website: parsedProfile.contact?.website || "",
+          email: profileData.contact?.email || "",
+          phone: profileData.contact?.phone || "Téléphone non trouvé",
+          address: profileData.contact?.address || "",
+          website: profileData.contact?.website || "",
         },
         socialMedia: {
-          ...parsedProfile.socialMedia,
-          linkedin: parsedProfile.socialMedia?.linkedin || "",
-          twitter: parsedProfile.socialMedia?.twitter || "",
-          facebook: parsedProfile.socialMedia?.facebook || "",
-          instagram: parsedProfile.socialMedia?.instagram || "",
+          linkedin: profileData.socialMedia?.linkedin || "",
+          twitter: profileData.socialMedia?.twitter || "",
+          facebook: profileData.socialMedia?.facebook || "",
+          instagram: profileData.socialMedia?.instagram || "",
         },
       };
-
-      console.log('🎯 [OpenAI] Final response data keys:', Object.keys(finalProfile));
-
-      // Ne pas sauvegarder automatiquement - laisser l'utilisateur décider
-      console.log('ℹ️ [OpenAI] Profile generated but not saved - waiting for user action');
 
       res.status(200).json({
         success: true,
         data: finalProfile,
+        provider: usedFallback ? 'anthropic' : 'openai'
       });
-    } catch (error) {
-      console.error("💥 [OpenAI] Profile generation error:", error);
-      next(error);
+    } catch (error: any) {
+      console.error("💥 [AI] Error:", error);
+      res.status(500).json({ success: false, message: 'AI generation failed', error: error.message });
     }
   }
 
