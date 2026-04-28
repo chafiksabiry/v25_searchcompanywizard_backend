@@ -127,10 +127,57 @@ export class OnboardingProgressController {
       const { status } = req.body;
 
       const companyObjectId = new Types.ObjectId(companyId);
-      const progress = await OnboardingProgress.findOne({ companyId: companyObjectId });
+      let progress = await OnboardingProgress.findOne({ companyId: companyObjectId });
+      
       if (!progress) {
-        return res.status(404).json({ message: 'Onboarding progress not found' });
+        console.log(`⚠️  [Onboarding] Progress not found for company ${companyId}. Initializing...`);
+        progress = new OnboardingProgress({
+          companyId: companyObjectId,
+          currentPhase: 1,
+          completedSteps: [],
+          phases: [
+            {
+              id: 1,
+              status: 'in_progress',
+              steps: [
+                { id: 1, status: 'in_progress' },
+                { id: 2, status: 'pending' }
+              ]
+            },
+            {
+              id: 2,
+              status: 'pending',
+              steps: [
+                { id: 3, status: 'pending' },
+                { id: 4, status: 'pending' },
+                { id: 5, status: 'pending' },
+                { id: 6, status: 'pending' },
+                { id: 7, status: 'pending' }
+              ]
+            },
+            {
+              id: 3,
+              status: 'pending',
+              steps: [
+                { id: 8, status: 'pending' },
+                { id: 9, status: 'pending' },
+                { id: 10, status: 'pending' }
+              ]
+            },
+            {
+              id: 4,
+              status: 'pending',
+              steps: [
+                { id: 11, status: 'pending' },
+                { id: 12, status: 'pending' },
+                { id: 13, status: 'pending' }
+              ]
+            }
+          ]
+        });
+        await progress.save();
       }
+
 
       // Mettre à jour le statut de l'étape
       const phase = progress.phases.find((p: Phase) => p.id === parseInt(phaseId));
