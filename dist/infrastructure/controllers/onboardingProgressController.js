@@ -20,6 +20,7 @@ class OnboardingProgressController {
         this.getProgressByUserId = this.getProgressByUserId.bind(this);
         this.fixCurrentPhase = this.fixCurrentPhase.bind(this);
         this.completeLastPhaseAndStep = this.completeLastPhaseAndStep.bind(this);
+        this.completeStep = this.completeStep.bind(this);
     }
     // Initialiser le progrès d'onboarding pour une entreprise
     async initializeProgress(req, res) {
@@ -262,6 +263,26 @@ class OnboardingProgressController {
         }
         catch (error) {
             res.status(500).json({ message: 'Error updating step progress', error });
+        }
+    }
+    // Compléter une étape (via query param companyId)
+    async completeStep(req, res) {
+        try {
+            const { phaseId, stepId } = req.params;
+            const { companyId } = req.query;
+            console.log(`[Onboarding] completeStep called for phase ${phaseId}, step ${stepId}, companyId ${companyId}`);
+            if (!companyId) {
+                return res.status(400).json({ message: 'companyId is required in query parameters' });
+            }
+            // Injecter les valeurs pour réutiliser updateStepProgress
+            req.params.companyId = companyId;
+            req.body = { status: 'completed' };
+            // Appeler updateStepProgress
+            return this.updateStepProgress(req, res);
+        }
+        catch (error) {
+            console.error('Error in completeStep:', error);
+            res.status(500).json({ message: 'Error completing step', error });
         }
     }
     // Mettre à jour la phase courante

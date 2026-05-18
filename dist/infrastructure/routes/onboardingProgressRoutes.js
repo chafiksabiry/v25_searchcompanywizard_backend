@@ -14,6 +14,8 @@ router.post('/companies/:companyId/onboarding', onboardingProgressController.ini
 router.get('/companies/:companyId/onboarding', onboardingProgressController.getProgress);
 // Mettre à jour le progrès d'une étape
 router.put('/companies/:companyId/onboarding/phases/:phaseId/steps/:stepId', onboardingProgressController.updateStepProgress);
+// Compléter une étape (via query param companyId)
+router.put('/phases/:phaseId/steps/:stepId/complete', onboardingProgressController.completeStep);
 // Mettre à jour la phase courante
 router.put('/companies/:companyId/onboarding/current-phase', onboardingProgressController.updateCurrentPhase);
 // Réinitialiser le progrès d'onboarding
