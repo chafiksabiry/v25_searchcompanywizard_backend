@@ -1,5 +1,6 @@
 import { CreateCompanyUseCase } from '../../application/use-cases/company/CreateCompanyUseCase';
 import { companyRepository } from '../repositories/companyRepository';
+import { OnboardingProgress } from '../models/onboardingProgress';
 
 export class CompanyService {
   private createCompanyUseCase = new CreateCompanyUseCase(companyRepository);
@@ -49,6 +50,7 @@ export class CompanyService {
   }
 
   async deleteCompany(id: string) {
+    await OnboardingProgress.deleteOne({ companyId: id });
     return await companyRepository.delete(id);
   }
 }

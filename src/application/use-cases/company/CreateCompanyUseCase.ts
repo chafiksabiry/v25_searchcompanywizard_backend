@@ -1,6 +1,11 @@
 import { Company } from '../../../domain/entities/Company';
 import { ICompanyRepository } from '../../../domain/repositories/ICompanyRepository';
 import { OnboardingProgress } from '../../../infrastructure/models/onboardingProgress';
+import {
+  advanceAfterProfileCreated,
+  applyComingSoonFlags,
+  getDefaultPhases,
+} from '../../../infrastructure/utils/onboardingProgressUtils';
 
 export class CreateCompanyUseCase {
   constructor(private companyRepository: ICompanyRepository) { }
@@ -17,49 +22,15 @@ export class CreateCompanyUseCase {
     // Initialize onboarding progress for the new company
     try {
       const companyId = (newCompany as any)._id;
+      const phases = getDefaultPhases();
+      applyComingSoonFlags(phases);
+      advanceAfterProfileCreated(phases);
+
       const initialProgress = new OnboardingProgress({
         companyId: companyId,
         currentPhase: 2,
-        completedSteps: [1], // Step 1 completed (company profile created), Phase 1 marked complete
-        phases: [
-          {
-            id: 1,
-            status: 'completed',
-            steps: [
-              { id: 1, status: 'completed', completedAt: new Date() },
-              { id: 2, status: 'pending' }
-            ]
-          },
-          {
-            id: 2,
-            status: 'in_progress',
-            steps: [
-              { id: 3, status: 'pending' },
-              { id: 4, status: 'pending' },
-              { id: 5, status: 'pending' },
-              { id: 6, status: 'pending' },
-              { id: 7, status: 'pending' }
-            ]
-          },
-          {
-            id: 3,
-            status: 'pending',
-            steps: [
-              { id: 8, status: 'pending' },
-              { id: 9, status: 'pending' },
-              { id: 10, status: 'pending' }
-            ]
-          },
-          {
-            id: 4,
-            status: 'pending',
-            steps: [
-              { id: 11, status: 'pending' },
-              { id: 12, status: 'pending' },
-              { id: 13, status: 'pending' }
-            ]
-          }
-        ]
+        completedSteps: [1],
+        phases,
       });
 
       await initialProgress.save();
