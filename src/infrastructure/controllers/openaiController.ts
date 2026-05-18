@@ -1,8 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
-import { CompanyModel } from '../database/models/CompanyModel';
-import { OnboardingProgress } from '../models/onboardingProgress';
 import { googleSearchService } from '../services/googleSearchService';
 
 const apiKey = process.env.OPENAI_API_KEY;
@@ -176,7 +174,11 @@ export class OpenAIController {
         logoUrl: req.body.logoUrl
       });
 
-      const { companyInfo, userId, logoUrl } = req.body;
+      const { companyInfo, userId, logoUrl, persist } = req.body;
+
+      if (persist === true) {
+        console.warn('⚠️ [AI] persist=true ignored — use POST /api/companies to save the company');
+      }
 
       if (!apiKey) {
         console.error('❌ [OpenAI] API key not configured');
@@ -321,66 +323,10 @@ export class OpenAIController {
         },
       };
 
-      const company = await CompanyModel.findOneAndUpdate(
-        { userId: finalProfile.userId, name: finalProfile.name },
-        finalProfile,
-        { upsert: true, new: true }
-      );
-
-      // Initialize onboarding progress if it doesn't exist
-      const existingProgress = await OnboardingProgress.findOne({ companyId: company._id });
-      if (!existingProgress) {
-        console.log(`🚀 [AI] Initializing onboarding progress for company: ${company._id}`);
-        const initialProgress = new OnboardingProgress({
-          companyId: company._id,
-          currentPhase: 1,
-          completedSteps: [],
-          phases: [
-            {
-              id: 1,
-              status: 'in_progress',
-              steps: [
-                { id: 1, status: 'in_progress' },
-                { id: 2, status: 'pending' }
-              ]
-            },
-            {
-              id: 2,
-              status: 'pending',
-              steps: [
-                { id: 3, status: 'pending' },
-                { id: 4, status: 'pending' },
-                { id: 5, status: 'pending' },
-                { id: 6, status: 'pending' },
-                { id: 7, status: 'pending' }
-              ]
-            },
-            {
-              id: 3,
-              status: 'pending',
-              steps: [
-                { id: 8, status: 'pending' },
-                { id: 9, status: 'pending' },
-                { id: 10, status: 'pending' }
-              ]
-            },
-            {
-              id: 4,
-              status: 'pending',
-              steps: [
-                { id: 11, status: 'pending' },
-                { id: 12, status: 'pending' },
-                { id: 13, status: 'pending' }
-              ]
-            }
-          ]
-        });
-        await initialProgress.save();
-      }
-
+      // Preview only — persistence happens on POST /companies (Publish Company)
       res.status(200).json({
         success: true,
-        data: company,
+        data: finalProfile,
         provider: usedFallback ? 'anthropic' : 'openai'
       });
     } catch (error: any) {

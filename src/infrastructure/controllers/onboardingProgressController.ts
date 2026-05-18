@@ -4,6 +4,13 @@ import { Types } from 'mongoose';
 import type { HydratedDocument } from 'mongoose';
 import { CompanyModel } from '../database/models/CompanyModel';
 import mongoose from 'mongoose';
+import {
+  applyComingSoonFlags,
+  getDefaultPhases,
+  isActiveStep,
+  isPhaseComplete,
+  advanceAfterProfileCreated,
+} from '../utils/onboardingProgressUtils';
 
 export class OnboardingProgressController {
   // Initialiser le progrès d'onboarding pour une entreprise
@@ -27,48 +34,11 @@ export class OnboardingProgressController {
       // Créer la structure initiale
       const initialProgress = new OnboardingProgress({
         companyId: companyObjectId,
-        currentPhase: 1, // Start at Phase 1
+        currentPhase: 1,
         completedSteps: [],
-        phases: [
-          {
-            id: 1,
-            status: 'in_progress',
-            steps: [
-              { id: 1, status: 'pending' },
-              { id: 2, status: 'pending' }
-            ]
-          },
-          {
-            id: 2,
-            status: 'pending',
-            steps: [
-              { id: 3, status: 'pending' },
-              { id: 4, status: 'pending' },
-              { id: 5, status: 'pending' },
-              { id: 6, status: 'pending' },
-              { id: 7, status: 'pending' }
-            ]
-          },
-          {
-            id: 3,
-            status: 'pending',
-            steps: [
-              { id: 8, status: 'pending' },
-              { id: 9, status: 'pending' },
-              { id: 10, status: 'pending' }
-            ]
-          },
-          {
-            id: 4,
-            status: 'pending',
-            steps: [
-              { id: 11, status: 'pending' },
-              { id: 12, status: 'pending' },
-              { id: 13, status: 'pending' }
-            ]
-          }
-        ]
+        phases: getDefaultPhases(),
       });
+      applyComingSoonFlags(initialProgress.phases);
 
       const savedProgress = await initialProgress.save();
       console.log('Nouveau progrès sauvegardé:', savedProgress);
@@ -78,6 +48,124 @@ export class OnboardingProgressController {
       console.error('Erreur lors de l\'initialisation:', error);
       res.status(500).json({ message: 'Error initializing onboarding progress', error });
     }
+  }
+
+  // Synchroniser et assurer la cohérence des données d'onboarding
+  async ensureConsistency(progress: any): Promise<boolean> {
+    let modified = false;
+
+    // 1. Appliquer les flags coming soon (step 2 et 7 désactivés et mis à pending si in_progress)
+    applyComingSoonFlags(progress.phases);
+
+    // 2. Synchroniser completedSteps avec l'état réel des steps dans les phases
+    const computedCompletedSteps: number[] = [];
+    for (const phase of progress.phases) {
+      for (const step of phase.steps) {
+        if (step.status === 'completed' && !computedCompletedSteps.includes(step.id)) {
+          computedCompletedSteps.push(step.id);
+        }
+      }
+    }
+
+    // Fusionner avec completedSteps existant
+    for (const stepId of progress.completedSteps) {
+      if (!computedCompletedSteps.includes(stepId)) {
+        // Si le step était marqué completed dans la liste mais pas dans la phase,
+        // le mettre à completed dans la phase correspondante
+        const phase = progress.phases.find((p: Phase) => p.steps.some((s: Step) => s.id === stepId));
+        if (phase) {
+          const step = phase.steps.find((s: Step) => s.id === stepId);
+          if (step && step.status !== 'completed') {
+            step.status = 'completed';
+            step.completedAt = step.completedAt || new Date();
+            modified = true;
+          }
+        }
+        computedCompletedSteps.push(stepId);
+      }
+    }
+
+    const sortedComputed = [...computedCompletedSteps].sort((a, b) => a - b);
+    const sortedCurrent = [...progress.completedSteps].sort((a, b) => a - b);
+    if (JSON.stringify(sortedComputed) !== JSON.stringify(sortedCurrent)) {
+      progress.completedSteps = computedCompletedSteps;
+      modified = true;
+    }
+
+    // 3. Avancer après la création du profil (Step 1)
+    const phase1 = progress.phases.find((p: Phase) => p.id === 1);
+    const step1Done = progress.completedSteps.includes(1);
+    if (step1Done && phase1) {
+      const step1 = phase1.steps.find((s: Step) => s.id === 1);
+      if (step1 && step1.status !== 'completed') {
+        step1.status = 'completed';
+        step1.completedAt = step1.completedAt || new Date();
+        modified = true;
+      }
+
+      if (phase1.status !== 'completed' || progress.currentPhase < 2) {
+        advanceAfterProfileCreated(progress.phases);
+        progress.currentPhase = Math.max(progress.currentPhase, 2);
+        modified = true;
+      }
+    }
+
+    // 4. Mettre à jour l'état de chaque phase et débloquer les suivantes si nécessaires
+    for (let i = 0; i < progress.phases.length; i++) {
+      const phase = progress.phases[i];
+      const nextPhase = progress.phases[i + 1];
+
+      const allStepsCompleted = isPhaseComplete(phase);
+      const activeSteps = phase.steps.filter(isActiveStep);
+
+      let targetStatus: 'pending' | 'in_progress' | 'completed' = 'pending';
+      
+      // Déterminer le statut cible de la phase
+      if (allStepsCompleted) {
+        targetStatus = 'completed';
+      } else if (i === 0 || (progress.phases[i - 1] && progress.phases[i - 1].status === 'completed')) {
+        // La phase est accessible car la précédente est complétée
+        targetStatus = 'in_progress';
+      } else if (activeSteps.some((s: Step) => s.status === 'completed' || s.status === 'in_progress')) {
+        targetStatus = 'in_progress';
+      }
+
+      if (phase.status !== targetStatus) {
+        phase.status = targetStatus;
+        modified = true;
+      }
+
+      // Si la phase est complétée, débloquer la suivante
+      if (targetStatus === 'completed' && nextPhase) {
+        if (nextPhase.status === 'pending') {
+          nextPhase.status = 'in_progress';
+          modified = true;
+        }
+        // Mettre le premier step actif de la phase suivante en "in_progress" si tout est pending
+        const firstActivePendingStep = nextPhase.steps.find((s: Step) => isActiveStep(s) && s.status === 'pending');
+        const hasAnyStepInProgressOrCompleted = nextPhase.steps.some((s: Step) => s.status === 'in_progress' || s.status === 'completed');
+        if (firstActivePendingStep && !hasAnyStepInProgressOrCompleted) {
+          firstActivePendingStep.status = 'in_progress';
+          modified = true;
+        }
+      }
+    }
+
+    // 5. Calculer la phase courante active
+    const currentActivePhase = progress.phases.find((p: Phase) => p.status === 'in_progress');
+    if (currentActivePhase && progress.currentPhase !== currentActivePhase.id) {
+      progress.currentPhase = currentActivePhase.id;
+      modified = true;
+    }
+
+    if (modified) {
+      progress.markModified('phases');
+      progress.markModified('completedSteps');
+      await progress.save();
+      console.log('✅ Onboarding progress consistency saved to DB');
+    }
+
+    return modified;
   }
 
   // Obtenir le progrès d'onboarding d'une entreprise
@@ -96,23 +184,7 @@ export class OnboardingProgressController {
         return res.status(404).json({ message: 'Onboarding progress not found' });
       }
 
-      // Rebuild completedSteps from phases data to ensure consistency
-      const computedCompletedSteps: number[] = [];
-      for (const phase of progress.phases) {
-        for (const step of phase.steps) {
-          if (step.status === 'completed' && !computedCompletedSteps.includes(step.id)) {
-            computedCompletedSteps.push(step.id);
-          }
-        }
-      }
-
-      // Update in DB if out of sync
-      const sortedComputed = [...computedCompletedSteps].sort((a, b) => a - b);
-      const sortedCurrent = [...progress.completedSteps].sort((a, b) => a - b);
-      if (JSON.stringify(sortedComputed) !== JSON.stringify(sortedCurrent)) {
-        progress.completedSteps = computedCompletedSteps;
-        await progress.save();
-      }
+      await this.ensureConsistency(progress);
 
       res.json(progress);
     } catch (error) {
@@ -135,49 +207,12 @@ export class OnboardingProgressController {
           companyId: companyObjectId,
           currentPhase: 1,
           completedSteps: [],
-          phases: [
-            {
-              id: 1,
-              status: 'in_progress',
-              steps: [
-                { id: 1, status: 'in_progress' },
-                { id: 2, status: 'pending' }
-              ]
-            },
-            {
-              id: 2,
-              status: 'pending',
-              steps: [
-                { id: 3, status: 'pending' },
-                { id: 4, status: 'pending' },
-                { id: 5, status: 'pending' },
-                { id: 6, status: 'pending' },
-                { id: 7, status: 'pending' }
-              ]
-            },
-            {
-              id: 3,
-              status: 'pending',
-              steps: [
-                { id: 8, status: 'pending' },
-                { id: 9, status: 'pending' },
-                { id: 10, status: 'pending' }
-              ]
-            },
-            {
-              id: 4,
-              status: 'pending',
-              steps: [
-                { id: 11, status: 'pending' },
-                { id: 12, status: 'pending' },
-                { id: 13, status: 'pending' }
-              ]
-            }
-          ]
+          phases: getDefaultPhases(),
         });
-        await progress.save();
+        await this.ensureConsistency(progress);
       }
 
+      await this.ensureConsistency(progress);
 
       // Mettre à jour le statut de l'étape
       const phase = progress.phases.find((p: Phase) => p.id === parseInt(phaseId));
@@ -190,16 +225,10 @@ export class OnboardingProgressController {
         return res.status(404).json({ message: 'Step not found' });
       }
 
-      // Validation: vérifier que toutes les phases précédentes sont complétées avant de modifier une étape
-      // Cette validation empêche la modification d'étapes dans une phase si les phases précédentes ne sont pas terminées
-      // Par exemple: on ne peut pas modifier les étapes de la phase 4 si les phases 1, 2 ou 3 ne sont pas complétées
       if (parseInt(phaseId) > 1) {
-        // Récupérer toutes les phases avec un ID inférieur à la phase de l'étape
         const previousPhases = progress.phases.filter((p: Phase) => p.id < parseInt(phaseId));
-        // Filtrer pour ne garder que les phases non complétées
-        const incompletePreviousPhases = previousPhases.filter((p: Phase) => p.status !== 'completed');
+        const incompletePreviousPhases = previousPhases.filter((p: Phase) => !isPhaseComplete(p));
 
-        // Si des phases précédentes ne sont pas complétées, refuser la modification
         if (incompletePreviousPhases.length > 0) {
           return res.status(400).json({
             message: 'Cannot modify steps in phase ' + phaseId + ' because previous phases are not completed',
@@ -219,24 +248,23 @@ export class OnboardingProgressController {
 
         // Trouver le prochain step disponible dans la phase courante
         const currentStepIndex = phase.steps.findIndex((s: Step) => s.id === parseInt(stepId));
-        const nextStep = phase.steps.slice(currentStepIndex + 1).find((s: Step) =>
-          !s.disabled &&
-          s.status !== 'completed'
-        );
+        const nextStep = phase.steps
+          .slice(currentStepIndex + 1)
+          .find((s: Step) => isActiveStep(s) && s.status !== 'completed');
 
         if (nextStep) {
-          // Si un prochain step est trouvé dans la phase courante, le marquer comme 'in_progress'
           nextStep.status = 'in_progress';
-        } else {
-          // Si pas de prochain step dans la phase courante, chercher dans la phase suivante
+        } else if (isPhaseComplete(phase)) {
+          phase.status = 'completed';
           const nextPhase = progress.phases.find((p: Phase) => p.id > phase.id);
           if (nextPhase) {
-            const firstAvailableStep = nextPhase.steps.find((s: Step) => !s.disabled && s.status !== 'completed');
+            nextPhase.status = 'in_progress';
+            progress.currentPhase = nextPhase.id;
+            const firstAvailableStep = nextPhase.steps.find(
+              (s: Step) => isActiveStep(s) && s.status !== 'completed'
+            );
             if (firstAvailableStep) {
-              // Ne pas mettre à jour currentPhase automatiquement - laisser l'utilisateur naviguer manuellement
-              // progress.currentPhase = nextPhase.id;
               firstAvailableStep.status = 'in_progress';
-              nextPhase.status = 'in_progress';
             }
           }
         }
@@ -250,39 +278,17 @@ export class OnboardingProgressController {
         step.completedAt = undefined;
       }
 
-      // Mettre à jour le statut de la phase
-      const activeSteps = phase.steps.filter((s: Step) => !s.disabled);
-
-      // Phase 2 : complétée dès que les étapes 3, 4, 5, 6 sont toutes complétées
-      // L'étape 7 (Reporting Setup) n'est pas bloquante pour la complétion de la phase 2
-      let allStepsCompleted: boolean;
-      if (phase.id === 2) {
-        const requiredStepIds = [3, 4, 5, 6];
-        allStepsCompleted = requiredStepIds.every(reqId =>
-          phase.steps.find((s: Step) => s.id === reqId)?.status === 'completed'
-        );
-      } else {
-        // Logique par défaut : toutes les étapes actives doivent être complétées
-        allStepsCompleted = activeSteps.every((s: Step) => s.status === 'completed');
+      if (parseInt(stepId) === 1 && status === 'completed') {
+        advanceAfterProfileCreated(progress.phases);
+        if (!progress.completedSteps.includes(1)) {
+          progress.completedSteps.push(1);
+        }
+        progress.currentPhase = 2;
       }
 
-      if (allStepsCompleted) {
-        phase.status = 'completed';
-      } else if (activeSteps.some((s: Step) => s.status === 'completed' || s.status === 'in_progress')) {
-        phase.status = 'in_progress';
-      }
+      // Lancer ensureConsistency pour propager les changements, recalibrer les statuts et sauvegarder dans la base
+      await this.ensureConsistency(progress);
 
-      // Calculer automatiquement la phase courante basée sur l'état réel
-      const currentActivePhase = progress.phases.find((p: Phase) =>
-        p.status === 'in_progress' ||
-        (p.status === 'pending' && p.steps.some((s: Step) => s.status === 'in_progress'))
-      );
-
-      if (currentActivePhase) {
-        progress.currentPhase = currentActivePhase.id;
-      }
-
-      await progress.save();
       res.json(progress);
     } catch (error) {
       res.status(500).json({ message: 'Error updating step progress', error });
@@ -302,29 +308,12 @@ export class OnboardingProgressController {
         return res.status(404).json({ message: 'Onboarding progress not found' });
       }
 
-      // Avant de vérifier, recalculer le statut de la Phase 2 si nécessaire
-      // Phase 2 est complétée dès que les étapes 3, 4, 5, 6 sont toutes complétées (étape 7 non bloquante)
-      const phase2 = progress.phases.find((p: Phase) => p.id === 2);
-      if (phase2 && phase2.status !== 'completed') {
-        const requiredStepIds = [3, 4, 5, 6];
-        const phase2Done = requiredStepIds.every(reqId =>
-          phase2.steps.find((s: Step) => s.id === reqId)?.status === 'completed'
-        );
-        if (phase2Done) {
-          phase2.status = 'completed';
-        }
-      }
+      await this.ensureConsistency(progress);
 
-      // Validation: vérifier que toutes les phases précédentes sont complétées
-      // Cette validation empêche l'accès à une phase si les phases précédentes ne sont pas terminées
-      // Par exemple: on ne peut pas accéder à la phase 4 si les phases 1, 2 ou 3 ne sont pas complétées
       if (phase > 1) {
-        // Récupérer toutes les phases avec un ID inférieur à la phase demandée
         const previousPhases = progress.phases.filter((p: Phase) => p.id < phase);
-        // Filtrer pour ne garder que les phases non complétées
-        const incompletePreviousPhases = previousPhases.filter((p: Phase) => p.status !== 'completed');
+        const incompletePreviousPhases = previousPhases.filter((p: Phase) => !isPhaseComplete(p));
 
-        // Si des phases précédentes ne sont pas complétées, refuser l'accès
         if (incompletePreviousPhases.length > 0) {
           return res.status(400).json({
             message: 'Cannot access phase ' + phase + ' because previous phases are not completed',
@@ -334,7 +323,10 @@ export class OnboardingProgressController {
       }
 
       progress.currentPhase = phase;
-      await progress.save();
+      
+      // Lancer ensureConsistency pour sauvegarder
+      await this.ensureConsistency(progress);
+      
       res.json(progress);
     } catch (error) {
       res.status(500).json({ message: 'Error updating current phase', error });
@@ -351,48 +343,11 @@ export class OnboardingProgressController {
       // Réinitialiser avec les valeurs par défaut
       const initialProgress = new OnboardingProgress({
         companyId,
-        currentPhase: 1, // Start at Phase 1
+        currentPhase: 1,
         completedSteps: [],
-        phases: [
-          {
-            id: 1,
-            status: 'in_progress',
-            steps: [
-              { id: 1, status: 'pending' },
-              { id: 2, status: 'pending' }
-            ]
-          },
-          {
-            id: 2,
-            status: 'pending',
-            steps: [
-              { id: 3, status: 'pending' },
-              { id: 4, status: 'pending' },
-              { id: 5, status: 'pending' },
-              { id: 6, status: 'pending' },
-              { id: 7, status: 'pending' }
-            ]
-          },
-          {
-            id: 3,
-            status: 'pending',
-            steps: [
-              { id: 8, status: 'pending' },
-              { id: 9, status: 'pending' },
-              { id: 10, status: 'pending' }
-            ]
-          },
-          {
-            id: 4,
-            status: 'pending',
-            steps: [
-              { id: 11, status: 'pending' },
-              { id: 12, status: 'pending' },
-              { id: 13, status: 'pending' }
-            ]
-          }
-        ]
+        phases: getDefaultPhases(),
       });
+      applyComingSoonFlags(initialProgress.phases);
 
       await initialProgress.save();
       res.json(initialProgress);
@@ -420,6 +375,8 @@ export class OnboardingProgressController {
       if (!progress) {
         return res.status(404).json({ message: 'No onboarding progress found' });
       }
+
+      await this.ensureConsistency(progress);
 
       res.status(200).json(progress);
     } catch (error) {
