@@ -2,46 +2,50 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.validateCompany = void 0;
 const zod_1 = require("zod");
+const optionalUrl = zod_1.z.string().optional();
 const coordinatesSchema = zod_1.z.object({
-    lat: zod_1.z.number(),
-    lng: zod_1.z.number()
+    lat: zod_1.z.number().optional(),
+    lng: zod_1.z.number().optional()
 }).optional();
 const contactSchema = zod_1.z.object({
-    email: zod_1.z.string().email().optional(),
+    email: zod_1.z.string().optional(),
     phone: zod_1.z.string().optional(),
     address: zod_1.z.string().optional(),
-    website: zod_1.z.string().url().optional(),
+    website: optionalUrl,
     coordinates: coordinatesSchema
-});
+}).optional();
 const socialMediaSchema = zod_1.z.object({
-    linkedin: zod_1.z.string().url().optional(),
-    twitter: zod_1.z.string().url().optional(),
-    facebook: zod_1.z.string().url().optional(),
-    instagram: zod_1.z.string().url().optional()
-});
+    linkedin: optionalUrl,
+    twitter: optionalUrl,
+    facebook: optionalUrl,
+    instagram: optionalUrl
+}).optional();
 const companySchema = zod_1.z.object({
+    userId: zod_1.z.string().optional(),
     name: zod_1.z.string().min(1),
+    logo: optionalUrl,
     industry: zod_1.z.string().optional(),
     founded: zod_1.z.string().optional(),
     headquarters: zod_1.z.string().optional(),
     overview: zod_1.z.string().min(1),
     mission: zod_1.z.string().optional(),
     culture: zod_1.z.object({
-        values: zod_1.z.array(zod_1.z.string()),
-        benefits: zod_1.z.array(zod_1.z.string()),
-        workEnvironment: zod_1.z.string()
-    }),
+        values: zod_1.z.array(zod_1.z.string()).optional().default([]),
+        benefits: zod_1.z.array(zod_1.z.string()).optional().default([]),
+        workEnvironment: zod_1.z.string().optional().default("")
+    }).optional().default({}),
     opportunities: zod_1.z.object({
-        roles: zod_1.z.array(zod_1.z.string()),
-        growthPotential: zod_1.z.string(),
-        training: zod_1.z.string()
-    }),
+        roles: zod_1.z.array(zod_1.z.string()).optional().default([]),
+        growthPotential: zod_1.z.string().optional().default(""),
+        training: zod_1.z.string().optional().default("")
+    }).optional().default({}),
     technology: zod_1.z.object({
-        stack: zod_1.z.array(zod_1.z.string()),
-        innovation: zod_1.z.string()
-    }),
-    contact: contactSchema,
-    socialMedia: socialMediaSchema
+        stack: zod_1.z.array(zod_1.z.string()).optional().default([]),
+        innovation: zod_1.z.string().optional().default("")
+    }).optional().default({}),
+    contact: contactSchema.optional().default({}),
+    socialMedia: socialMediaSchema.optional().default({}),
+    differentiators: zod_1.z.array(zod_1.z.string()).optional().default([])
 });
 const validateCompany = (req, res, next) => {
     try {

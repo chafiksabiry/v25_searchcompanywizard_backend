@@ -13,6 +13,18 @@ import {
 } from '../utils/onboardingProgressUtils';
 
 export class OnboardingProgressController {
+  constructor() {
+    this.initializeProgress = this.initializeProgress.bind(this);
+    this.ensureConsistency = this.ensureConsistency.bind(this);
+    this.getProgress = this.getProgress.bind(this);
+    this.updateStepProgress = this.updateStepProgress.bind(this);
+    this.updateCurrentPhase = this.updateCurrentPhase.bind(this);
+    this.resetProgress = this.resetProgress.bind(this);
+    this.getProgressByUserId = this.getProgressByUserId.bind(this);
+    this.fixCurrentPhase = this.fixCurrentPhase.bind(this);
+    this.completeLastPhaseAndStep = this.completeLastPhaseAndStep.bind(this);
+  }
+
   // Initialiser le progrès d'onboarding pour une entreprise
   async initializeProgress(req: Request, res: Response) {
     try {
