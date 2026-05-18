@@ -299,8 +299,14 @@ export class OnboardingProgressController {
         progress.currentPhase = 2;
       }
 
-      // Lancer ensureConsistency pour propager les changements, recalibrer les statuts et sauvegarder dans la base
+      // Lancer ensureConsistency pour propager les changements, recalibrer les statuts
       await this.ensureConsistency(progress);
+
+      // S'assurer que les modifications de updateStepProgress sont bien sauvegardées
+      progress.markModified('phases');
+      progress.markModified('completedSteps');
+      await progress.save();
+      console.log('✅ Onboarding progress saved after updateStepProgress');
 
       res.json(progress);
     } catch (error) {
