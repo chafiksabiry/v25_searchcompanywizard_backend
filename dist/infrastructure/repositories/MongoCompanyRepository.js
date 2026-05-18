@@ -1,26 +1,36 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.MongoCompanyRepository = void 0;
-const CompanyModel_1 = require("../database/models/CompanyModel");
+const CompanyModel_1 = require("../../infrastructure/database/models/CompanyModel");
 class MongoCompanyRepository {
-    async findAll() {
-        return CompanyModel_1.CompanyModel.find().sort({ createdAt: -1 });
-    }
-    async findById(id) {
-        return CompanyModel_1.CompanyModel.findById(id);
+    constructor() {
+        this.companyModel = CompanyModel_1.CompanyModel;
     }
     async findByName(name) {
-        return CompanyModel_1.CompanyModel.findOne({ name: new RegExp(name, 'i') });
+        return await this.companyModel.findOne({ name });
     }
-    async create(company) {
-        return CompanyModel_1.CompanyModel.create(company);
+    async create(data) {
+        const company = new this.companyModel(data);
+        return await company.save();
     }
-    async update(id, company) {
-        return CompanyModel_1.CompanyModel.findByIdAndUpdate(id, company, { new: true });
+    async findAll() {
+        return await this.companyModel.find();
+    }
+    async findById(id) {
+        return await this.companyModel.findById(id);
+    }
+    async update(id, data) {
+        return await this.companyModel.findByIdAndUpdate(id, data, {
+            new: true,
+            runValidators: true,
+        });
+    }
+    async findOneByUserId(userId) {
+        return await CompanyModel_1.CompanyModel.findOne({ userId });
     }
     async delete(id) {
-        const result = await CompanyModel_1.CompanyModel.findByIdAndDelete(id);
-        return !!result;
+        const result = await this.companyModel.findByIdAndDelete(id);
+        return result !== null;
     }
 }
 exports.MongoCompanyRepository = MongoCompanyRepository;

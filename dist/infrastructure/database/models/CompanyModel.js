@@ -6,12 +6,20 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.CompanyModel = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const companySchema = new mongoose_1.default.Schema({
+    userId: { type: mongoose_1.default.Schema.Types.ObjectId, default: null },
     name: { type: String, required: true },
+    logo: String,
     industry: String,
     founded: String,
     headquarters: String,
     overview: { type: String, required: true },
+    companyIntro: String,
     mission: String,
+    subscription: {
+        type: String,
+        enum: ['free', 'standard', 'premium'],
+        default: 'free'
+    },
     culture: {
         values: [String],
         benefits: [String],
@@ -41,7 +49,8 @@ const companySchema = new mongoose_1.default.Schema({
         twitter: String,
         facebook: String,
         instagram: String
-    }
+    },
+    differentiators: [String]
 }, {
     timestamps: true
 });

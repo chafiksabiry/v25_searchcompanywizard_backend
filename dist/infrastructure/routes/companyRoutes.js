@@ -2,40 +2,16 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.companyRoutes = void 0;
 const express_1 = require("express");
-const MongoCompanyRepository_1 = require("../repositories/MongoCompanyRepository");
-const CreateCompanyUseCase_1 = require("../../application/use-cases/company/CreateCompanyUseCase");
+const companyController_1 = require("../controllers/companyController");
 const validation_1 = require("../middleware/validation");
 const router = (0, express_1.Router)();
 exports.companyRoutes = router;
-const companyRepository = new MongoCompanyRepository_1.MongoCompanyRepository();
-const createCompanyUseCase = new CreateCompanyUseCase_1.CreateCompanyUseCase(companyRepository);
-router.post('/', validation_1.validateCompany, async (req, res, next) => {
-    try {
-        const company = await createCompanyUseCase.execute(req.body);
-        res.status(201).json(company);
-    }
-    catch (error) {
-        next(error);
-    }
-});
-router.get('/', async (req, res, next) => {
-    try {
-        const companies = await companyRepository.findAll();
-        res.json(companies);
-    }
-    catch (error) {
-        next(error);
-    }
-});
-router.get('/:id', async (req, res, next) => {
-    try {
-        const company = await companyRepository.findById(req.params.id);
-        if (!company) {
-            return res.status(404).json({ message: 'Company not found' });
-        }
-        res.json(company);
-    }
-    catch (error) {
-        next(error);
-    }
-});
+const companyController = new companyController_1.CompanyController();
+router.post('/', validation_1.validateCompany, companyController.createCompany);
+router.get('/', companyController.getAllCompanies);
+router.get('/:id', companyController.getCompanyById);
+router.get('/:id/details', companyController.getCompanyDetails);
+router.get('/user/:userId', companyController.getCompanyByUserId);
+router.put('/:id', validation_1.validateCompany, companyController.updateCompany);
+router.put('/:id/subscription', companyController.updateSubscription);
+router.delete('/:id', companyController.deleteCompany);
