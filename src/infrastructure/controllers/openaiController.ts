@@ -167,6 +167,82 @@ export class OpenAIController {
     }
   }
 
+  private extractContactDataFromHtml(html: string, baseUrl?: string): {
+    phones: string[];
+    emails: string[];
+    socialMedia: { linkedin?: string; twitter?: string; facebook?: string; instagram?: string; youtube?: string };
+  } {
+    const phones = new Set<string>();
+    const emails = new Set<string>();
+    const socialMedia: { linkedin?: string; twitter?: string; facebook?: string; instagram?: string; youtube?: string } = {};
+
+    let originHost = '';
+    try {
+      if (baseUrl) originHost = new URL(baseUrl).hostname.replace(/^www\./, '');
+    } catch { /* ignore */ }
+
+    const telMatches = html.matchAll(/href=["']tel:([^"']+)["']/gi);
+    for (const m of telMatches) {
+      const cleaned = m[1].replace(/[^\d+]/g, '');
+      if (cleaned.length >= 7) phones.add(this.normalizePhone(cleaned));
+    }
+
+    const phoneRegex = /(?:\+?\d{1,3}[\s.\-()]?)?(?:\(?\d{2,4}\)?[\s.\-]?){2,5}\d{2,4}/g;
+    const phoneCandidates = html.match(phoneRegex) || [];
+    for (const raw of phoneCandidates) {
+      const digits = raw.replace(/[^\d+]/g, '');
+      if (digits.length < 8 || digits.length > 16) continue;
+      if (/^\d{4,8}$/.test(digits) && !raw.includes('+')) continue;
+      phones.add(this.normalizePhone(digits.startsWith('+') ? digits : raw.trim()));
+      if (phones.size >= 6) break;
+    }
+
+    const mailtoMatches = html.matchAll(/href=["']mailto:([^"'?]+)/gi);
+    for (const m of mailtoMatches) emails.add(m[1].trim().toLowerCase());
+
+    const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+    const emailCandidates = html.match(emailRegex) || [];
+    for (const raw of emailCandidates) {
+      const lower = raw.toLowerCase();
+      if (/\.(png|jpe?g|gif|svg|webp|js|css|woff2?|ttf|otf)$/i.test(lower)) continue;
+      if (lower.includes('@sentry') || lower.includes('@example.') || lower.includes('@wixpress')) continue;
+      emails.add(lower);
+      if (emails.size >= 5) break;
+    }
+
+    const findSocialUrl = (domain: RegExp): string | undefined => {
+      const re = new RegExp(`https?:\\/\\/(?:[a-z0-9-]+\\.)?${domain.source}\\/[A-Za-z0-9._\\-/?=&%#]+`, 'gi');
+      const matches = html.match(re);
+      if (!matches) return undefined;
+      const filtered = matches.filter((u) => {
+        const low = u.toLowerCase();
+        if (originHost && low.includes(`/${originHost}`)) return false;
+        if (/\/(share|sharer|intent|status|hashtag)\b/.test(low)) return false;
+        if (/(\.css|\.js|\.png|\.jpg|\.svg)(\?|#|$)/i.test(low)) return false;
+        return true;
+      });
+      const ranked = filtered.sort((a, b) => a.length - b.length);
+      return ranked[0]?.replace(/[)>\]"',.;]+$/, '');
+    };
+
+    socialMedia.linkedin = findSocialUrl(/linkedin\.com/);
+    socialMedia.twitter = findSocialUrl(/(?:twitter|x)\.com/);
+    socialMedia.facebook = findSocialUrl(/facebook\.com/);
+    socialMedia.instagram = findSocialUrl(/instagram\.com/);
+    socialMedia.youtube = findSocialUrl(/youtube\.com/);
+
+    return {
+      phones: Array.from(phones).slice(0, 6),
+      emails: Array.from(emails).slice(0, 5),
+      socialMedia,
+    };
+  }
+
+  private normalizePhone(raw: string): string {
+    const trimmed = raw.replace(/\s+/g, ' ').trim();
+    return trimmed;
+  }
+
   private extractTextFromHtml(html: string): { title: string; description: string; bodyText: string; ogImage?: string } {
     const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
     const title = titleMatch ? titleMatch[1].trim() : '';
@@ -219,10 +295,8 @@ export class OpenAIController {
         return res.status(400).json({ success: false, message: 'Invalid URL format' });
       }
 
-      console.log(`🌐 [Scrape] Fetching ${normalizedUrl}`);
-      let html = '';
-      try {
-        const response = await axios.get<string>(normalizedUrl, {
+      const fetchHtml = async (target: string): Promise<string> => {
+        const response = await axios.get<string>(target, {
           timeout: 15000,
           maxContentLength: 5 * 1024 * 1024,
           responseType: 'text',
@@ -234,7 +308,13 @@ export class OpenAIController {
           },
           validateStatus: (s) => s >= 200 && s < 400,
         });
-        html = typeof response.data === 'string' ? response.data : String(response.data ?? '');
+        return typeof response.data === 'string' ? response.data : String(response.data ?? '');
+      };
+
+      console.log(`🌐 [Scrape] Fetching ${normalizedUrl}`);
+      let html = '';
+      try {
+        html = await fetchHtml(normalizedUrl);
       } catch (err: any) {
         console.warn('⚠️ [Scrape] Failed:', err.message);
         return res.status(502).json({
@@ -244,12 +324,56 @@ export class OpenAIController {
       }
 
       const { title, description, bodyText, ogImage } = this.extractTextFromHtml(html);
+      const contactData = this.extractContactDataFromHtml(html, normalizedUrl);
+
+      const needsMoreContact =
+        contactData.phones.length === 0 ||
+        (!contactData.socialMedia.linkedin &&
+          !contactData.socialMedia.twitter &&
+          !contactData.socialMedia.facebook &&
+          !contactData.socialMedia.instagram);
+
+      if (needsMoreContact) {
+        const candidatePaths = ['/contact', '/contact-us', '/contactez-nous', '/about', '/about-us', '/a-propos'];
+        for (const path of candidatePaths) {
+          try {
+            const subUrl = new URL(path, normalizedUrl).toString();
+            console.log(`🌐 [Scrape] Trying secondary ${subUrl}`);
+            const subHtml = await fetchHtml(subUrl);
+            const subContact = this.extractContactDataFromHtml(subHtml, normalizedUrl);
+            for (const p of subContact.phones) if (!contactData.phones.includes(p)) contactData.phones.push(p);
+            for (const e of subContact.emails) if (!contactData.emails.includes(e)) contactData.emails.push(e);
+            for (const key of ['linkedin', 'twitter', 'facebook', 'instagram', 'youtube'] as const) {
+              if (!contactData.socialMedia[key] && subContact.socialMedia[key]) {
+                contactData.socialMedia[key] = subContact.socialMedia[key];
+              }
+            }
+            if (contactData.phones.length > 0 && contactData.socialMedia.linkedin) break;
+          } catch {
+            // ignore unreachable sub pages
+          }
+        }
+      }
       const inferredLogo = logoUrl || ogImage || `https://logo.clearbit.com/${parsed.hostname}`;
+
+      console.log('🔎 [Scrape] Extracted contact data:', {
+        phones: contactData.phones,
+        emails: contactData.emails,
+        social: contactData.socialMedia,
+      });
+
+      const socialLines = Object.entries(contactData.socialMedia)
+        .filter(([, v]) => Boolean(v))
+        .map(([k, v]) => `${k.charAt(0).toUpperCase() + k.slice(1)}: ${v}`)
+        .join('\n');
 
       const companyInfo = [
         `Website: ${normalizedUrl}`,
         title ? `Page Title: ${title}` : '',
         description ? `Meta Description: ${description}` : '',
+        contactData.phones.length ? `Detected Phone Numbers (use the first one as main): ${contactData.phones.join(', ')}` : '',
+        contactData.emails.length ? `Detected Emails (use the most generic one — contact@, info@, hello@ — first): ${contactData.emails.join(', ')}` : '',
+        socialLines ? `Detected Social Media URLs (use them as-is, do not invent):\n${socialLines}` : '',
         bodyText ? `Page Content: ${bodyText}` : '',
       ]
         .filter(Boolean)
@@ -260,6 +384,8 @@ export class OpenAIController {
         userId,
         logoUrl: inferredLogo,
         persist: false,
+        _scrapedContact: contactData,
+        _websiteUrl: normalizedUrl,
       };
 
       return this.generateCompanyProfile(req, res, next);
@@ -277,7 +403,7 @@ export class OpenAIController {
         logoUrl: req.body.logoUrl
       });
 
-      const { companyInfo, userId, logoUrl, persist } = req.body;
+      const { companyInfo, userId, logoUrl, persist, _scrapedContact, _websiteUrl } = req.body;
 
       if (persist === true) {
         console.warn('⚠️ [AI] persist=true ignored — use POST /api/companies to save the company');
@@ -393,6 +519,36 @@ export class OpenAIController {
 
       console.log('📝 [AI] Skipping company intro generation for now, using default.');
 
+      const scraped = _scrapedContact as
+        | {
+            phones: string[];
+            emails: string[];
+            socialMedia: { linkedin?: string; twitter?: string; facebook?: string; instagram?: string; youtube?: string };
+          }
+        | undefined;
+
+      const pickEmail = (aiEmail?: string): string => {
+        if (scraped?.emails?.length) {
+          const generic = scraped.emails.find((e) =>
+            /^(contact|info|hello|hi|sales|support|office|press|jobs)@/i.test(e)
+          );
+          return generic || scraped.emails[0];
+        }
+        return aiEmail || "";
+      };
+
+      const pickPhone = (aiPhone?: string): string => {
+        if (scraped?.phones?.length) return scraped.phones[0];
+        if (aiPhone && aiPhone !== "Téléphone non trouvé") return aiPhone;
+        return "";
+      };
+
+      const pickSocial = (key: keyof NonNullable<typeof scraped>['socialMedia'], aiValue?: string): string => {
+        const scrapedVal = scraped?.socialMedia?.[key];
+        if (scrapedVal) return scrapedVal;
+        return aiValue || "";
+      };
+
       const finalProfile: CompanyProfile = {
         userId: userId || '681a91212c1ca099fe2b17df',
         companyIntro: "Généré par AI",
@@ -413,16 +569,16 @@ export class OpenAIController {
           innovation: profileData.technology?.innovation || "",
         },
         contact: {
-          email: profileData.contact?.email || "",
-          phone: profileData.contact?.phone || "Téléphone non trouvé",
+          email: pickEmail(profileData.contact?.email),
+          phone: pickPhone(profileData.contact?.phone),
           address: profileData.contact?.address || "",
-          website: profileData.contact?.website || "",
+          website: profileData.contact?.website || _websiteUrl || "",
         },
         socialMedia: {
-          linkedin: profileData.socialMedia?.linkedin || "",
-          twitter: profileData.socialMedia?.twitter || "",
-          facebook: profileData.socialMedia?.facebook || "",
-          instagram: profileData.socialMedia?.instagram || "",
+          linkedin: pickSocial("linkedin", profileData.socialMedia?.linkedin),
+          twitter: pickSocial("twitter", profileData.socialMedia?.twitter),
+          facebook: pickSocial("facebook", profileData.socialMedia?.facebook),
+          instagram: pickSocial("instagram", profileData.socialMedia?.instagram),
         },
       };
 
