@@ -167,14 +167,37 @@ export class OpenAIController {
     }
   }
 
+  private isFakePhone(raw: string): boolean {
+    const digits = raw.replace(/\D/g, '');
+    if (digits.length < 8) return true;
+    // All same digit (e.g. 1111111111)
+    if (/^(\d)\1+$/.test(digits)) return true;
+    // Strict ascending or descending sequence (e.g. 123456789, 0987654321)
+    let asc = true, desc = true;
+    for (let i = 1; i < digits.length; i++) {
+      if (parseInt(digits[i]) !== parseInt(digits[i - 1]) + 1) asc = false;
+      if (parseInt(digits[i]) !== parseInt(digits[i - 1]) - 1) desc = false;
+    }
+    if (asc || desc) return true;
+    // Classic placeholder French "+33 1 23 45 67 89" or "0123456789"
+    if (/^(?:33)?0?1?23456789\d?$/.test(digits)) return true;
+    // US 555 area code (reserved for fiction)
+    if (/^1?555\d{7}$/.test(digits)) return true;
+    // 123-4567 / 555-1234 style fakes anywhere
+    if (/12345|23456|34567|45678|56789/.test(digits) && digits.length <= 12) return true;
+    return false;
+  }
+
   private extractContactDataFromHtml(html: string, baseUrl?: string): {
     phones: string[];
     emails: string[];
+    address?: string;
     socialMedia: { linkedin?: string; twitter?: string; facebook?: string; instagram?: string; youtube?: string };
   } {
     const phones = new Set<string>();
     const emails = new Set<string>();
     const socialMedia: { linkedin?: string; twitter?: string; facebook?: string; instagram?: string; youtube?: string } = {};
+    let address: string | undefined;
 
     let originHost = '';
     try {
@@ -184,7 +207,9 @@ export class OpenAIController {
     const telMatches = html.matchAll(/href=["']tel:([^"']+)["']/gi);
     for (const m of telMatches) {
       const cleaned = m[1].replace(/[^\d+]/g, '');
-      if (cleaned.length >= 7) phones.add(this.normalizePhone(cleaned));
+      if (cleaned.length >= 7 && !this.isFakePhone(cleaned)) {
+        phones.add(this.normalizePhone(cleaned));
+      }
     }
 
     const phoneRegex = /(?:\+?\d{1,3}[\s.\-()]?)?(?:\(?\d{2,4}\)?[\s.\-]?){2,5}\d{2,4}/g;
@@ -193,6 +218,7 @@ export class OpenAIController {
       const digits = raw.replace(/[^\d+]/g, '');
       if (digits.length < 8 || digits.length > 16) continue;
       if (/^\d{4,8}$/.test(digits) && !raw.includes('+')) continue;
+      if (this.isFakePhone(raw)) continue;
       phones.add(this.normalizePhone(digits.startsWith('+') ? digits : raw.trim()));
       if (phones.size >= 6) break;
     }
@@ -231,11 +257,60 @@ export class OpenAIController {
     socialMedia.instagram = findSocialUrl(/instagram\.com/);
     socialMedia.youtube = findSocialUrl(/youtube\.com/);
 
+    address = this.extractAddressFromHtml(html);
+
     return {
       phones: Array.from(phones).slice(0, 6),
       emails: Array.from(emails).slice(0, 5),
+      address,
       socialMedia,
     };
+  }
+
+  private extractAddressFromHtml(html: string): string | undefined {
+    // 1) JSON-LD Organization / PostalAddress (schema.org)
+    const jsonLdMatches = html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
+    for (const m of jsonLdMatches) {
+      try {
+        const raw = m[1].trim();
+        if (!raw) continue;
+        const parsed = JSON.parse(raw);
+        const candidates = Array.isArray(parsed) ? parsed : [parsed];
+        const queue: any[] = [...candidates];
+        while (queue.length) {
+          const node = queue.shift();
+          if (!node || typeof node !== 'object') continue;
+          if (node['@graph']) queue.push(...(Array.isArray(node['@graph']) ? node['@graph'] : []));
+          const addr = node.address;
+          if (addr) {
+            if (typeof addr === 'string' && addr.trim().length > 5) return addr.trim();
+            const a = addr as any;
+            const parts = [a.streetAddress, a.addressLocality, a.postalCode, a.addressRegion, a.addressCountry]
+              .filter(Boolean)
+              .map((p: any) => String(p).trim());
+            if (parts.length >= 2) return parts.join(', ');
+          }
+        }
+      } catch {
+        // ignore malformed JSON-LD
+      }
+    }
+
+    // 2) <address> tag
+    const addressTag = html.match(/<address[^>]*>([\s\S]*?)<\/address>/i);
+    if (addressTag) {
+      const cleaned = addressTag[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      if (cleaned.length > 5 && cleaned.length < 250) return cleaned;
+    }
+
+    // 3) schema.org microdata
+    const micro = html.match(/itemtype=["']https?:\/\/schema\.org\/PostalAddress["'][^>]*>([\s\S]{0,600})/i);
+    if (micro) {
+      const cleaned = micro[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      if (cleaned.length > 5 && cleaned.length < 250) return cleaned;
+    }
+
+    return undefined;
   }
 
   private normalizePhone(raw: string): string {
@@ -333,8 +408,8 @@ export class OpenAIController {
           !contactData.socialMedia.facebook &&
           !contactData.socialMedia.instagram);
 
-      if (needsMoreContact) {
-        const candidatePaths = ['/contact', '/contact-us', '/contactez-nous', '/about', '/about-us', '/a-propos'];
+      if (needsMoreContact || !contactData.address) {
+        const candidatePaths = ['/contact', '/contact-us', '/contactez-nous', '/about', '/about-us', '/a-propos', '/mentions-legales', '/legal'];
         for (const path of candidatePaths) {
           try {
             const subUrl = new URL(path, normalizedUrl).toString();
@@ -343,12 +418,13 @@ export class OpenAIController {
             const subContact = this.extractContactDataFromHtml(subHtml, normalizedUrl);
             for (const p of subContact.phones) if (!contactData.phones.includes(p)) contactData.phones.push(p);
             for (const e of subContact.emails) if (!contactData.emails.includes(e)) contactData.emails.push(e);
+            if (!contactData.address && subContact.address) contactData.address = subContact.address;
             for (const key of ['linkedin', 'twitter', 'facebook', 'instagram', 'youtube'] as const) {
               if (!contactData.socialMedia[key] && subContact.socialMedia[key]) {
                 contactData.socialMedia[key] = subContact.socialMedia[key];
               }
             }
-            if (contactData.phones.length > 0 && contactData.socialMedia.linkedin) break;
+            if (contactData.phones.length > 0 && contactData.socialMedia.linkedin && contactData.address) break;
           } catch {
             // ignore unreachable sub pages
           }
@@ -359,6 +435,7 @@ export class OpenAIController {
       console.log('🔎 [Scrape] Extracted contact data:', {
         phones: contactData.phones,
         emails: contactData.emails,
+        address: contactData.address,
         social: contactData.socialMedia,
       });
 
@@ -367,14 +444,18 @@ export class OpenAIController {
         .map(([k, v]) => `${k.charAt(0).toUpperCase() + k.slice(1)}: ${v}`)
         .join('\n');
 
+      const rootUrl = `${parsed.protocol}//${parsed.hostname}${parsed.port ? ':' + parsed.port : ''}`;
+
       const companyInfo = [
-        `Website: ${normalizedUrl}`,
+        `Website: ${rootUrl}`,
         title ? `Page Title: ${title}` : '',
         description ? `Meta Description: ${description}` : '',
-        contactData.phones.length ? `Detected Phone Numbers (use the first one as main): ${contactData.phones.join(', ')}` : '',
-        contactData.emails.length ? `Detected Emails (use the most generic one — contact@, info@, hello@ — first): ${contactData.emails.join(', ')}` : '',
-        socialLines ? `Detected Social Media URLs (use them as-is, do not invent):\n${socialLines}` : '',
+        contactData.phones.length ? `Detected Phone Numbers (use the first one as main): ${contactData.phones.join(', ')}` : 'NO PHONE NUMBER FOUND on the page — leave the phone field as empty string. Do NOT invent it.',
+        contactData.emails.length ? `Detected Emails (use the most generic one — contact@, info@, hello@ — first): ${contactData.emails.join(', ')}` : 'NO EMAIL FOUND on the page — leave the email field as empty string. Do NOT invent it.',
+        contactData.address ? `Detected Address (use it verbatim): ${contactData.address}` : 'NO PHYSICAL ADDRESS FOUND on the page — leave the address field as empty string. Do NOT invent it.',
+        socialLines ? `Detected Social Media URLs (use them as-is, do not invent):\n${socialLines}` : 'NO SOCIAL MEDIA URLS FOUND on the page — leave social media fields as empty strings.',
         bodyText ? `Page Content: ${bodyText}` : '',
+        `STRICT RULE: For contact.email, contact.phone, contact.address and socialMedia.* fields, ONLY use values that appear above as "Detected ...". If a value was not detected, output an empty string "" for that field. NEVER invent placeholders like "+33 1 23 45 67 89", "123 Rue …", "info@example.com", etc.`,
       ]
         .filter(Boolean)
         .join('\n');
@@ -385,7 +466,7 @@ export class OpenAIController {
         logoUrl: inferredLogo,
         persist: false,
         _scrapedContact: contactData,
-        _websiteUrl: normalizedUrl,
+        _websiteUrl: rootUrl,
       };
 
       return this.generateCompanyProfile(req, res, next);
@@ -523,6 +604,7 @@ export class OpenAIController {
         | {
             phones: string[];
             emails: string[];
+            address?: string;
             socialMedia: { linkedin?: string; twitter?: string; facebook?: string; instagram?: string; youtube?: string };
           }
         | undefined;
@@ -539,14 +621,37 @@ export class OpenAIController {
 
       const pickPhone = (aiPhone?: string): string => {
         if (scraped?.phones?.length) return scraped.phones[0];
-        if (aiPhone && aiPhone !== "Téléphone non trouvé") return aiPhone;
+        // Only keep AI phone if it doesn't look fabricated.
+        if (aiPhone && aiPhone !== "Téléphone non trouvé" && !this.isFakePhone(aiPhone)) {
+          return aiPhone;
+        }
         return "";
+      };
+
+      const pickAddress = (aiAddress?: string): string => {
+        if (scraped?.address) return scraped.address;
+        // Reject obvious AI placeholders if no real address was scraped.
+        if (!aiAddress) return "";
+        const lower = aiAddress.toLowerCase();
+        if (/\b(123|n\/a|not specified|unknown|tbd|example)\b/.test(lower)) return "";
+        if (/rue de la technologie|rue de l'innovation|main street|123 main/.test(lower)) return "";
+        return aiAddress;
       };
 
       const pickSocial = (key: keyof NonNullable<typeof scraped>['socialMedia'], aiValue?: string): string => {
         const scrapedVal = scraped?.socialMedia?.[key];
         if (scrapedVal) return scrapedVal;
-        return aiValue || "";
+        // Don't accept invented social URLs when nothing was scraped.
+        if (!aiValue) return "";
+        const lower = aiValue.toLowerCase();
+        if (/example|placeholder|yourcompany|companyname/.test(lower)) return "";
+        return aiValue;
+      };
+
+      const pickWebsite = (aiWebsite?: string): string => {
+        // Always prefer the canonical root URL the user actually provided.
+        if (_websiteUrl) return _websiteUrl;
+        return aiWebsite || "";
       };
 
       const finalProfile: CompanyProfile = {
@@ -571,8 +676,8 @@ export class OpenAIController {
         contact: {
           email: pickEmail(profileData.contact?.email),
           phone: pickPhone(profileData.contact?.phone),
-          address: profileData.contact?.address || "",
-          website: profileData.contact?.website || _websiteUrl || "",
+          address: pickAddress(profileData.contact?.address),
+          website: pickWebsite(profileData.contact?.website),
         },
         socialMedia: {
           linkedin: pickSocial("linkedin", profileData.socialMedia?.linkedin),
