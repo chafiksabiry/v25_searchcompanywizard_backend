@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
+import axios from 'axios';
 import { googleSearchService } from '../services/googleSearchService';
 
 const apiKey = process.env.OPENAI_API_KEY;
@@ -163,6 +164,108 @@ export class OpenAIController {
     } catch (error) {
       console.error("💥 [OpenAI] Logo search error:", error);
       next(error);
+    }
+  }
+
+  private extractTextFromHtml(html: string): { title: string; description: string; bodyText: string; ogImage?: string } {
+    const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+    const title = titleMatch ? titleMatch[1].trim() : '';
+
+    const descMatch =
+      html.match(/<meta[^>]+name=["']description["'][^>]*content=["']([^"']+)["']/i) ||
+      html.match(/<meta[^>]+content=["']([^"']+)["'][^>]*name=["']description["']/i) ||
+      html.match(/<meta[^>]+property=["']og:description["'][^>]*content=["']([^"']+)["']/i);
+    const description = descMatch ? descMatch[1].trim() : '';
+
+    const ogImageMatch = html.match(/<meta[^>]+property=["']og:image["'][^>]*content=["']([^"']+)["']/i);
+    const ogImage = ogImageMatch ? ogImageMatch[1].trim() : undefined;
+
+    const cleaned = html
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ')
+      .replace(/<!--[\s\S]*?-->/g, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    const bodyText = cleaned.slice(0, 6000);
+    return { title, description, bodyText, ogImage };
+  }
+
+  async generateProfileFromUrl(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { url, userId, logoUrl } = req.body;
+
+      if (!url || typeof url !== 'string') {
+        return res.status(400).json({ success: false, message: 'A valid url is required' });
+      }
+
+      let normalizedUrl = url.trim();
+      if (!/^https?:\/\//i.test(normalizedUrl)) {
+        normalizedUrl = `https://${normalizedUrl}`;
+      }
+
+      let parsed: URL;
+      try {
+        parsed = new URL(normalizedUrl);
+      } catch {
+        return res.status(400).json({ success: false, message: 'Invalid URL format' });
+      }
+
+      console.log(`🌐 [Scrape] Fetching ${normalizedUrl}`);
+      let html = '';
+      try {
+        const response = await axios.get<string>(normalizedUrl, {
+          timeout: 15000,
+          maxContentLength: 5 * 1024 * 1024,
+          responseType: 'text',
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (compatible; HARXProfileBot/1.0; +https://harx.ai)',
+            Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9,fr;q=0.8',
+          },
+          validateStatus: (s) => s >= 200 && s < 400,
+        });
+        html = typeof response.data === 'string' ? response.data : String(response.data ?? '');
+      } catch (err: any) {
+        console.warn('⚠️ [Scrape] Failed:', err.message);
+        return res.status(502).json({
+          success: false,
+          message: `Failed to fetch URL: ${err.message}`,
+        });
+      }
+
+      const { title, description, bodyText, ogImage } = this.extractTextFromHtml(html);
+      const inferredLogo = logoUrl || ogImage || `https://logo.clearbit.com/${parsed.hostname}`;
+
+      const companyInfo = [
+        `Website: ${normalizedUrl}`,
+        title ? `Page Title: ${title}` : '',
+        description ? `Meta Description: ${description}` : '',
+        bodyText ? `Page Content: ${bodyText}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n');
+
+      req.body = {
+        companyInfo,
+        userId,
+        logoUrl: inferredLogo,
+        persist: false,
+      };
+
+      return this.generateCompanyProfile(req, res, next);
+    } catch (error: any) {
+      console.error('💥 [Scrape] Error:', error);
+      res.status(500).json({ success: false, message: 'Failed to scrape and generate profile', error: error.message });
     }
   }
 
