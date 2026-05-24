@@ -318,7 +318,110 @@ export class OpenAIController {
     return trimmed;
   }
 
-  private extractTextFromHtml(html: string): { title: string; description: string; bodyText: string; ogImage?: string } {
+  private mergeScrapedContact(
+    target: {
+      phones: string[];
+      emails: string[];
+      address?: string;
+      socialMedia: { linkedin?: string; twitter?: string; facebook?: string; instagram?: string; youtube?: string };
+    },
+    source: {
+      phones: string[];
+      emails: string[];
+      address?: string;
+      socialMedia: { linkedin?: string; twitter?: string; facebook?: string; instagram?: string; youtube?: string };
+    }
+  ): void {
+    for (const p of source.phones) {
+      if (!target.phones.includes(p)) target.phones.push(p);
+    }
+    for (const e of source.emails) {
+      if (!target.emails.includes(e)) target.emails.push(e);
+    }
+    if (!target.address && source.address) target.address = source.address;
+    for (const key of ['linkedin', 'twitter', 'facebook', 'instagram', 'youtube'] as const) {
+      if (!target.socialMedia[key] && source.socialMedia[key]) {
+        target.socialMedia[key] = source.socialMedia[key];
+      }
+    }
+  }
+
+  private extractFooterText(html: string): string {
+    // Try real <footer> tag first
+    const footerMatch = html.match(/<footer[^>]*>([\s\S]*?)<\/footer>/i);
+    if (footerMatch) {
+      return footerMatch[1]
+        .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 2500);
+    }
+    // Fallback: take the last ~3 kB of visible text
+    const cleaned = html
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return cleaned.slice(-3000);
+  }
+
+  private extractFoundedYearFromHtml(html: string): string | undefined {
+    const text = html
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/\s+/g, ' ');
+
+    const patterns = [
+      /fond[ée]\s+en\s+(\d{4})/i,
+      /fond[ée]e?\s+en\s+(\d{4})/i,
+      /cr[ée]{1,2}\s+en\s+(\d{4})/i,
+      /depuis\s+(\d{4})/i,
+      /founded\s+in\s+(\d{4})/i,
+      /established\s+in\s+(\d{4})/i,
+      /since\s+(\d{4})/i,
+      /est\.\s*(\d{4})/i,
+    ];
+    for (const re of patterns) {
+      const m = text.match(re);
+      if (m) {
+        const year = parseInt(m[1], 10);
+        if (year >= 1800 && year <= new Date().getFullYear()) return String(year);
+      }
+    }
+
+    // JSON-LD foundingDate / dateCreated
+    const jsonLdMatches = html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
+    for (const m of jsonLdMatches) {
+      try {
+        const parsed = JSON.parse(m[1].trim());
+        const candidates = Array.isArray(parsed) ? parsed : [parsed];
+        for (const node of candidates) {
+          const queue: any[] = [node];
+          while (queue.length) {
+            const cur = queue.shift();
+            if (!cur || typeof cur !== 'object') continue;
+            if (cur['@graph']) queue.push(...(Array.isArray(cur['@graph']) ? cur['@graph'] : []));
+            const date = cur.foundingDate || cur.dateCreated || cur.dateFounded;
+            if (typeof date === 'string') {
+              const y = date.match(/^(\d{4})/);
+              if (y) return y[1];
+            }
+          }
+        }
+      } catch { /* ignore */ }
+    }
+
+    return undefined;
+  }
+
+  private extractTextFromHtml(html: string, maxChars = 20000): { title: string; description: string; bodyText: string; ogImage?: string } {
     const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
     const title = titleMatch ? titleMatch[1].trim() : '';
 
@@ -346,7 +449,8 @@ export class OpenAIController {
       .replace(/\s+/g, ' ')
       .trim();
 
-    const bodyText = cleaned.slice(0, 6000);
+    // Keep a much larger window so the AI sees the whole page (incl. footer)
+    const bodyText = cleaned.length > maxChars ? cleaned.slice(0, maxChars) : cleaned;
     return { title, description, bodyText, ogImage };
   }
 
@@ -400,43 +504,77 @@ export class OpenAIController {
 
       const { title, description, bodyText, ogImage } = this.extractTextFromHtml(html);
       const contactData = this.extractContactDataFromHtml(html, normalizedUrl);
+      const footerText = this.extractFooterText(html);
+      let foundedYear = this.extractFoundedYearFromHtml(html);
 
-      const needsMoreContact =
-        contactData.phones.length === 0 ||
-        (!contactData.socialMedia.linkedin &&
-          !contactData.socialMedia.twitter &&
-          !contactData.socialMedia.facebook &&
-          !contactData.socialMedia.instagram);
+      // Footer often holds phone, email, founding year — parse it explicitly
+      const footerHtmlBlock =
+        html.match(/<footer[^>]*>[\s\S]*?<\/footer>/i)?.[0] ?? html.slice(-12000);
+      this.mergeScrapedContact(
+        contactData,
+        this.extractContactDataFromHtml(footerHtmlBlock, normalizedUrl)
+      );
+      if (!foundedYear) {
+        const footerYear = this.extractFoundedYearFromHtml(footerHtmlBlock);
+        if (footerYear) foundedYear = footerYear;
+      }
 
-      if (needsMoreContact || !contactData.address) {
-        const candidatePaths = ['/contact', '/contact-us', '/contactez-nous', '/about', '/about-us', '/a-propos', '/mentions-legales', '/legal'];
-        for (const path of candidatePaths) {
-          try {
-            const subUrl = new URL(path, normalizedUrl).toString();
-            console.log(`🌐 [Scrape] Trying secondary ${subUrl}`);
-            const subHtml = await fetchHtml(subUrl);
-            const subContact = this.extractContactDataFromHtml(subHtml, normalizedUrl);
-            for (const p of subContact.phones) if (!contactData.phones.includes(p)) contactData.phones.push(p);
-            for (const e of subContact.emails) if (!contactData.emails.includes(e)) contactData.emails.push(e);
-            if (!contactData.address && subContact.address) contactData.address = subContact.address;
-            for (const key of ['linkedin', 'twitter', 'facebook', 'instagram', 'youtube'] as const) {
-              if (!contactData.socialMedia[key] && subContact.socialMedia[key]) {
-                contactData.socialMedia[key] = subContact.socialMedia[key];
-              }
-            }
-            if (contactData.phones.length > 0 && contactData.socialMedia.linkedin && contactData.address) break;
-          } catch {
-            // ignore unreachable sub pages
+      // Systematically crawl the most informative sub-pages so the AI sees the
+      // whole site, not just the landing page.
+      const candidatePaths = [
+        '/about', '/about-us', '/a-propos', '/qui-sommes-nous',
+        '/contact', '/contact-us', '/contactez-nous',
+        '/mentions-legales', '/legal',
+        '/services', '/solutions', '/products',
+        '/team', '/equipe',
+      ];
+
+      const subPageTexts: { url: string; title: string; description: string; text: string }[] = [];
+      const visited = new Set<string>([normalizedUrl]);
+      // Cap how many sub-pages we scrape to keep things fast.
+      const MAX_SUB_PAGES = 6;
+
+      for (const path of candidatePaths) {
+        if (subPageTexts.length >= MAX_SUB_PAGES) break;
+        try {
+          const subUrl = new URL(path, normalizedUrl).toString();
+          if (visited.has(subUrl)) continue;
+          visited.add(subUrl);
+          console.log(`🌐 [Scrape] Fetching sub-page ${subUrl}`);
+          const subHtml = await fetchHtml(subUrl);
+
+          // Collect contacts + year
+          const subContact = this.extractContactDataFromHtml(subHtml, normalizedUrl);
+          this.mergeScrapedContact(contactData, subContact);
+          if (!foundedYear) {
+            const subYear = this.extractFoundedYearFromHtml(subHtml);
+            if (subYear) foundedYear = subYear;
           }
+
+          // Collect the visible text of this sub-page
+          const sub = this.extractTextFromHtml(subHtml, 8000);
+          if (sub.bodyText.length > 100) {
+            subPageTexts.push({
+              url: subUrl,
+              title: sub.title,
+              description: sub.description,
+              text: sub.bodyText,
+            });
+          }
+        } catch {
+          // ignore unreachable sub pages
         }
       }
       const inferredLogo = logoUrl || ogImage || `https://logo.clearbit.com/${parsed.hostname}`;
 
-      console.log('🔎 [Scrape] Extracted contact data:', {
+      console.log('🔎 [Scrape] Extracted data:', {
         phones: contactData.phones,
         emails: contactData.emails,
         address: contactData.address,
         social: contactData.socialMedia,
+        founded: foundedYear,
+        subPages: subPageTexts.map((s) => s.url),
+        footerSnippet: footerText.slice(0, 200),
       });
 
       const socialLines = Object.entries(contactData.socialMedia)
@@ -446,16 +584,41 @@ export class OpenAIController {
 
       const rootUrl = `${parsed.protocol}//${parsed.hostname}${parsed.port ? ':' + parsed.port : ''}`;
 
+      // Build a single "site dump" the AI can analyse: home page text + every
+      // crawled sub-page. We keep it under ~40k chars to stay well below the
+      // model context window.
+      const sitePages: { label: string; text: string }[] = [
+        { label: `=== HOME PAGE (${normalizedUrl}) ===`, text: bodyText },
+        ...subPageTexts.map((s) => ({
+          label: `=== ${s.title || s.url} (${s.url}) ===${s.description ? `\nDescription: ${s.description}` : ''}`,
+          text: s.text,
+        })),
+      ];
+
+      let combinedSiteText = '';
+      const MAX_TOTAL_CHARS = 40000;
+      for (const page of sitePages) {
+        const chunk = `\n\n${page.label}\n${page.text}`;
+        if (combinedSiteText.length + chunk.length > MAX_TOTAL_CHARS) {
+          combinedSiteText += chunk.slice(0, Math.max(0, MAX_TOTAL_CHARS - combinedSiteText.length));
+          break;
+        }
+        combinedSiteText += chunk;
+      }
+      combinedSiteText = combinedSiteText.trim();
+
       const companyInfo = [
         `Website: ${rootUrl}`,
         title ? `Page Title: ${title}` : '',
         description ? `Meta Description: ${description}` : '',
+        foundedYear ? `Detected Founding Year: ${foundedYear}` : 'NO FOUNDING YEAR FOUND — leave the "founded" field as empty string.',
         contactData.phones.length ? `Detected Phone Numbers (use the first one as main): ${contactData.phones.join(', ')}` : 'NO PHONE NUMBER FOUND on the page — leave the phone field as empty string. Do NOT invent it.',
         contactData.emails.length ? `Detected Emails (use the most generic one — contact@, info@, hello@ — first): ${contactData.emails.join(', ')}` : 'NO EMAIL FOUND on the page — leave the email field as empty string. Do NOT invent it.',
         contactData.address ? `Detected Address (use it verbatim): ${contactData.address}` : 'NO PHYSICAL ADDRESS FOUND on the page — leave the address field as empty string. Do NOT invent it.',
         socialLines ? `Detected Social Media URLs (use them as-is, do not invent):\n${socialLines}` : 'NO SOCIAL MEDIA URLS FOUND on the page — leave social media fields as empty strings.',
-        bodyText ? `Page Content: ${bodyText}` : '',
-        `STRICT RULE: For contact.email, contact.phone, contact.address and socialMedia.* fields, ONLY use values that appear above as "Detected ...". If a value was not detected, output an empty string "" for that field. NEVER invent placeholders like "+33 1 23 45 67 89", "123 Rue …", "info@example.com", etc.`,
+        footerText ? `Footer Content (inspect this carefully for contacts, year, address, social, legal name):\n${footerText}` : '',
+        combinedSiteText ? `Full Site Content (read everything to extract overview, mission, services, values, team, etc.):\n${combinedSiteText}` : '',
+        `STRICT RULE: For contact.email, contact.phone, contact.address, socialMedia.* and founded fields, ONLY use values that appear above as "Detected ..." or that you can quote verbatim from the Footer/Full Site Content. If a value was not detected and is not present in the text, output an empty string "" for that field. NEVER invent placeholders like "+33 1 23 45 67 89", "123 Rue …", "info@example.com", "2010", etc. For overview/mission/culture/opportunities/technology, base your answer ONLY on the Full Site Content above; do not invent facts.`,
       ]
         .filter(Boolean)
         .join('\n');
@@ -466,6 +629,7 @@ export class OpenAIController {
         logoUrl: inferredLogo,
         persist: false,
         _scrapedContact: contactData,
+        _scrapedFounded: foundedYear,
         _websiteUrl: rootUrl,
       };
 
@@ -484,7 +648,7 @@ export class OpenAIController {
         logoUrl: req.body.logoUrl
       });
 
-      const { companyInfo, userId, logoUrl, persist, _scrapedContact, _websiteUrl } = req.body;
+      const { companyInfo, userId, logoUrl, persist, _scrapedContact, _scrapedFounded, _websiteUrl } = req.body;
 
       if (persist === true) {
         console.warn('⚠️ [AI] persist=true ignored — use POST /api/companies to save the company');
@@ -512,7 +676,9 @@ export class OpenAIController {
       try {
         const openai = new OpenAI({ apiKey: apiKey! });
         const response = await openai.chat.completions.create({
-        model: "gpt-3.5-turbo-1106",
+        // gpt-4o-mini has a 128k context window — required to ingest the full
+        // site dump (home + sub-pages, up to ~40k chars) without truncation.
+        model: process.env.OPENAI_MODEL || "gpt-4o-mini",
         response_format: { type: "json_object" },
         messages: [
           {
@@ -569,8 +735,8 @@ export class OpenAIController {
             content: `Generate a JSON company profile for: ${companyInfo}`,
           },
         ],
-        temperature: 0.7,
-        max_tokens: 1500,
+        temperature: 0.3,
+        max_tokens: 2200,
       });
 
         const content = response.choices[0]?.message?.content;
@@ -654,10 +820,22 @@ export class OpenAIController {
         return aiWebsite || "";
       };
 
+      const pickFounded = (aiYear?: string): string => {
+        if (_scrapedFounded) return String(_scrapedFounded);
+        if (!aiYear) return "";
+        const trimmed = String(aiYear).trim();
+        const m = trimmed.match(/\b(\d{4})\b/);
+        if (!m) return "";
+        const y = parseInt(m[1], 10);
+        if (y < 1800 || y > new Date().getFullYear()) return "";
+        return m[1];
+      };
+
       const finalProfile: CompanyProfile = {
         userId: userId || '681a91212c1ca099fe2b17df',
         companyIntro: "Généré par AI",
         ...profileData,
+        founded: pickFounded(profileData.founded),
         logo: logoUrl || profileData.logo,
         culture: {
           values: profileData.culture?.values || [],
