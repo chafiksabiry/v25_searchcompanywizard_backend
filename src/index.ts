@@ -8,6 +8,7 @@ import { errorHandler } from './infrastructure/middleware/errorHandler';
 import { companyRoutes } from './infrastructure/routes/companyRoutes';
 import { onboardingProgressRoutes } from './infrastructure/routes/onboardingProgressRoutes';
 import { openaiRoutes } from './infrastructure/routes/openaiRoutes';
+import { uploadsRoutes } from './infrastructure/routes/uploadsRoutes';
 // import { userRoutes } from './infrastructure/routes/userRoutes';
 
 import { Request, Response } from 'express';
@@ -36,6 +37,7 @@ app.use(express.json());
 
 // Database connection health check middleware
 app.use((req, res, next) => {
+  if (req.path.startsWith('/api/uploads')) return next();
   if (mongoose.connection.readyState !== 1 || !mongoose.connection.db) {
     return res.status(503).json({
       success: false,
@@ -49,6 +51,7 @@ app.use((req, res, next) => {
 app.use('/api/companies', companyRoutes);
 app.use('/api/openai', openaiRoutes);
 app.use('/api/onboarding', onboardingProgressRoutes);
+app.use('/api/uploads', uploadsRoutes);
 
 // Start server
 const startServer = () => {
