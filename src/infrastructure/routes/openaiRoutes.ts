@@ -19,6 +19,11 @@ router.post('/generate-profile', (req: any, res: any, next: any) => {
   openaiController.generateCompanyProfile(req, res, next);
 });
 
+// Route pour scraper une URL puis générer le profil
+router.post('/generate-from-url', (req: any, res: any, next: any) => {
+  openaiController.generateProfileFromUrl(req, res, next);
+});
+
 // Route pour générer les catégories d'unicité
 router.post('/generate-uniqueness', (req: any, res: any, next: any) => {
   openaiController.generateUniquenessCategories(req, res, next);
