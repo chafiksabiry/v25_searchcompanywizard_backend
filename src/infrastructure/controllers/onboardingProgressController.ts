@@ -10,6 +10,7 @@ import {
   isActiveStep,
   isPhaseComplete,
   advanceAfterProfileCreated,
+  migrateCallScriptToPhase3,
 } from '../utils/onboardingProgressUtils';
 
 export class OnboardingProgressController {
@@ -66,6 +67,13 @@ export class OnboardingProgressController {
   // Synchroniser et assurer la cohérence des données d'onboarding
   async ensureConsistency(progress: any): Promise<boolean> {
     let modified = false;
+
+    // 0. Migration : "Call Script" (id 6) a été déplacé de la phase 2
+    //    vers la phase 3 (après E-learning id 9, avant Session Planning id 10).
+    //    Pour les anciens enregistrements, on déplace le step 6 sans perdre
+    //    son statut.
+    const callScriptMigrated = migrateCallScriptToPhase3(progress.phases);
+    if (callScriptMigrated) modified = true;
 
     // 1. Appliquer les flags coming soon (step 2 et 7 désactivés et mis à pending si in_progress)
     applyComingSoonFlags(progress.phases);
