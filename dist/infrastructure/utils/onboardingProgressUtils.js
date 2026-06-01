@@ -1,42 +1,15 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.COMING_SOON_STEP_IDS = exports.LEGACY_ONBOARDING_STEP_MAP = void 0;
-exports.mapLegacyStepId = mapLegacyStepId;
-exports.normalizeCompletedStepIds = normalizeCompletedStepIds;
+exports.COMING_SOON_STEP_IDS = void 0;
 exports.isActiveStep = isActiveStep;
 exports.applyComingSoonFlags = applyComingSoonFlags;
 exports.isPhaseComplete = isPhaseComplete;
 exports.getDefaultPhases = getDefaultPhases;
-exports.migrateOnboardingStepStructure = migrateOnboardingStepStructure;
+exports.migrateToNewStepStructure = migrateToNewStepStructure;
 exports.migrateCallScriptToPhase3 = migrateCallScriptToPhase3;
 exports.advanceAfterProfileCreated = advanceAfterProfileCreated;
-/**
- * Canonical onboarding layout (2026):
- * Phase 1: 1–2 | Phase 2: 3–6 | Phase 3: 7–10 | Phase 4: 11–13
- *
- * Legacy mapping (pre-2026 reorder):
- *   7 → 6 (Reporting) | 8 → 7 (KB) | 9 → 8 (Training) | 6 → 9 (Call Script)
- */
-exports.LEGACY_ONBOARDING_STEP_MAP = {
-    7: 6,
-    8: 7,
-    9: 8,
-    6: 9,
-};
 /** Steps shown as "Coming soon" in the UI — do not block phase progression */
-exports.COMING_SOON_STEP_IDS = new Set([2]);
-function mapLegacyStepId(stepId) {
-    return exports.LEGACY_ONBOARDING_STEP_MAP[stepId] ?? stepId;
-}
-function normalizeCompletedStepIds(stepIds) {
-    const normalized = new Set();
-    for (const id of stepIds) {
-        if (!Number.isFinite(id))
-            continue;
-        normalized.add(mapLegacyStepId(id));
-    }
-    return [...normalized].sort((a, b) => a - b);
-}
+exports.COMING_SOON_STEP_IDS = new Set([2, 6]);
 function isActiveStep(step) {
     return !step.disabled && !exports.COMING_SOON_STEP_IDS.has(step.id);
 }
@@ -52,11 +25,11 @@ function applyComingSoonFlags(phases) {
         }
     }
 }
-const PHASE_2_REQUIRED_STEP_IDS = [3, 4, 5, 6];
-const PHASE_3_STEP_ORDER = [7, 8, 9, 10];
 function isPhaseComplete(phase) {
     if (phase.id === 2) {
-        return PHASE_2_REQUIRED_STEP_IDS.every((reqId) => phase.steps.find((s) => s.id === reqId)?.status === 'completed');
+        // Phase 2 only requires Gigs / Telephony / Contacts (3, 4, 5).
+        const requiredStepIds = [3, 4, 5];
+        return requiredStepIds.every((reqId) => phase.steps.find((s) => s.id === reqId)?.status === 'completed');
     }
     const activeSteps = phase.steps.filter(isActiveStep);
     if (activeSteps.length === 0)
@@ -80,17 +53,17 @@ function getDefaultPhases() {
                 { id: 3, status: 'pending' },
                 { id: 4, status: 'pending' },
                 { id: 5, status: 'pending' },
-                { id: 6, status: 'pending' },
+                { id: 6, status: 'pending', disabled: true }, // Reporting Setup — coming soon
             ],
         },
         {
             id: 3,
             status: 'pending',
             steps: [
-                { id: 7, status: 'pending' },
-                { id: 8, status: 'pending' },
-                { id: 9, status: 'pending' },
-                { id: 10, status: 'pending' },
+                { id: 7, status: 'pending' }, // Knowledge Base
+                { id: 8, status: 'pending' }, // E-learning / REP Onboarding
+                { id: 9, status: 'pending' }, // Call Script
+                { id: 10, status: 'pending' }, // Session Planning
             ],
         },
         {
@@ -104,93 +77,118 @@ function getDefaultPhases() {
         },
     ];
 }
-function phaseStepSignature(phase) {
-    if (!phase)
-        return '';
-    return phase.steps.map((s) => s.id).join(',');
-}
-function needsStructureMigration(phases) {
-    const phase2 = phases.find((p) => p.id === 2);
-    const phase3 = phases.find((p) => p.id === 3);
-    if (!phase2 || !phase3)
-        return true;
-    if (phaseStepSignature(phase2) !== '3,4,5,6')
-        return true;
-    if (phaseStepSignature(phase3) !== PHASE_3_STEP_ORDER.join(','))
-        return true;
-    return false;
-}
-function mergeStepState(target, source) {
-    const rank = (s) => s === 'completed' ? 3 : s === 'in_progress' ? 2 : 1;
-    if (rank(source.status) > rank(target.status)) {
-        target.status = source.status;
-        target.completedAt = source.completedAt;
-    }
-    else if (source.status === 'completed' && !target.completedAt) {
-        target.completedAt = source.completedAt;
-    }
-}
 /**
- * Rebuild phases to the canonical 2026 step IDs while preserving statuses.
- * Also normalizes completedSteps. Returns true when the document changed.
+ * Step ID remapping from the old layout to the new one.
+ *
+ * Old → New
+ *   6 (Call Script, was in phase 2 or 3) → 9
+ *   8 (Knowledge Base)                   → 7
+ *   9 (REP Onboarding)                   → 8
+ *   7 (Reporting, disabled, now removed) → removed
  */
-function migrateOnboardingStepStructure(progress) {
+const STEP_ID_REMAP = {
+    6: 9,
+    7: null, // Reporting step removed
+    8: 7,
+    9: 8,
+};
+/**
+ * Migrate an existing onboarding document to the new step structure:
+ *  - Phase 2: remove Reporting (old 7) step; keep only 3, 4, 5
+ *  - Phase 3: steps become 7 (KB), 8 (REP Onboarding), 9 (Call Script), 10
+ *  - completedSteps remapped accordingly
+ *
+ * Returns true when anything was modified.
+ */
+function migrateToNewStepStructure(phases, completedSteps) {
     let modified = false;
-    const normalizedCompleted = normalizeCompletedStepIds(progress.completedSteps);
-    const sortedBefore = [...progress.completedSteps].sort((a, b) => a - b);
-    const sortedAfter = [...normalizedCompleted];
-    if (JSON.stringify(sortedBefore) !== JSON.stringify(sortedAfter)) {
-        progress.completedSteps = normalizedCompleted;
-        modified = true;
+    // ── Phase 2: drop old Reporting (id 7) and old Call Script (id 6) ────────
+    // Then ensure the new Reporting step (id 6, disabled) is present.
+    const phase2 = phases.find((p) => p.id === 2);
+    if (phase2) {
+        const before = phase2.steps.length;
+        // Remove legacy step 7 (old Reporting key) and any old Call Script step 6
+        phase2.steps = phase2.steps.filter((s) => s.id !== 7);
+        // Remove old Call Script step 6 only if it hasn't been converted yet
+        // (phase 3 will receive it as step 9)
+        const hasOldCallScriptInP2 = phase2.steps.some((s) => s.id === 6);
+        if (hasOldCallScriptInP2) {
+            phase2.steps = phase2.steps.filter((s) => s.id !== 6);
+        }
+        // Ensure new Reporting step 6 (disabled) exists in phase 2
+        if (!phase2.steps.some((s) => s.id === 6)) {
+            phase2.steps.push({ id: 6, status: 'pending', disabled: true });
+            modified = true;
+        }
+        if (phase2.steps.length !== before)
+            modified = true;
     }
-    if (!needsStructureMigration(progress.phases)) {
-        return modified;
+    // ── Phase 3: rebuild with new IDs ─────────────────────────────────────────
+    // phaseStructureChanged tracks whether phase 3 was in the old layout and
+    // required rebuilding. It gates the completedSteps remap below: once the
+    // phase structure is already [7,8,9,10] the completedSteps are also already
+    // in new-ID space — re-running the remap would corrupt them (e.g. new step 7
+    // would be treated as old step 7/Reporting and dropped).
+    let phaseStructureChanged = false;
+    const phase3 = phases.find((p) => p.id === 3);
+    if (phase3) {
+        const oldStepMap = new Map(phase3.steps.map((s) => [s.id, s]));
+        // Old Call Script was step 6 — look only in phase 3 old data (not phase 2's new Reporting step)
+        const strayStep6 = oldStepMap.get(6);
+        const newSteps = [
+            // 7 = KB (was 8) — preserve status, strip any stale disabled flag
+            oldStepMap.has(8)
+                ? { ...oldStepMap.get(8), id: 7, disabled: undefined }
+                : { id: 7, status: 'pending' },
+            // 8 = REP Onboarding (was 9) — strip disabled: old step 9 may have had disabled:true
+            oldStepMap.has(9)
+                ? { ...oldStepMap.get(9), id: 8, disabled: undefined }
+                : { id: 8, status: 'pending' },
+            // 9 = Call Script — always active, never inherit disabled from old Reporting step 6
+            strayStep6
+                ? { ...strayStep6, id: 9, disabled: undefined }
+                : { id: 9, status: 'pending' },
+            // 10 = Session Planning (unchanged)
+            oldStepMap.has(10)
+                ? oldStepMap.get(10)
+                : { id: 10, status: 'pending' },
+        ];
+        const changed = JSON.stringify(phase3.steps.map((s) => s.id)) !==
+            JSON.stringify(newSteps.map((s) => s.id));
+        if (changed) {
+            phase3.steps = newSteps;
+            phaseStructureChanged = true;
+            modified = true;
+        }
     }
-    const stepByCanonicalId = new Map();
-    for (const phase of progress.phases) {
-        for (const step of phase.steps) {
-            const canonicalId = mapLegacyStepId(step.id);
-            const existing = stepByCanonicalId.get(canonicalId);
-            if (!existing) {
-                stepByCanonicalId.set(canonicalId, {
-                    id: canonicalId,
-                    status: step.status,
-                    completedAt: step.completedAt,
-                    disabled: step.disabled,
-                });
+    // ── Remap completedSteps ──────────────────────────────────────────────────
+    // Only remap if the phase structure was actually in the old layout.
+    // If it was already migrated, completedSteps IDs are already in new-ID space
+    // and re-running the remap would silently corrupt them.
+    if (phaseStructureChanged) {
+        const newCompleted = [];
+        let completedModified = false;
+        for (const id of completedSteps) {
+            if (id in STEP_ID_REMAP) {
+                completedModified = true;
+                const mapped = STEP_ID_REMAP[id];
+                if (mapped !== null)
+                    newCompleted.push(mapped);
             }
             else {
-                mergeStepState(existing, step);
-            }
-            if (step.status === 'completed' && !progress.completedSteps.includes(canonicalId)) {
-                progress.completedSteps.push(canonicalId);
-                modified = true;
+                newCompleted.push(id);
             }
         }
+        if (completedModified)
+            modified = true;
+        return { modified, newCompletedSteps: completedModified ? newCompleted : completedSteps };
     }
-    progress.completedSteps = normalizeCompletedStepIds(progress.completedSteps);
-    const newPhases = getDefaultPhases();
-    for (const phase of newPhases) {
-        for (const step of phase.steps) {
-            const saved = stepByCanonicalId.get(step.id);
-            if (saved) {
-                step.status = saved.status;
-                step.completedAt = saved.completedAt;
-                if (saved.disabled && exports.COMING_SOON_STEP_IDS.has(step.id)) {
-                    step.disabled = true;
-                }
-            }
-        }
-    }
-    applyComingSoonFlags(newPhases);
-    progress.phases = newPhases;
-    return true;
+    return { modified, newCompletedSteps: completedSteps };
 }
-/**
- * @deprecated Use migrateOnboardingStepStructure — kept for callers that only moved call script.
- */
+/** @deprecated use migrateToNewStepStructure */
 function migrateCallScriptToPhase3(phases) {
-    return migrateOnboardingStepStructure({ phases, completedSteps: [] });
+    const { modified } = migrateToNewStepStructure(phases, []);
+    return modified;
 }
 /** After step 1 is completed: phase 1 done, unlock phase 2 / step 3 */
 function advanceAfterProfileCreated(phases) {

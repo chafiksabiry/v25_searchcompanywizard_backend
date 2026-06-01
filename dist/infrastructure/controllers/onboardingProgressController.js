@@ -56,11 +56,15 @@ class OnboardingProgressController {
     // Synchroniser et assurer la cohérence des données d'onboarding
     async ensureConsistency(progress) {
         let modified = false;
-        // 0. Migration structure 2026 : phase 2 = 3–6, phase 3 = 7–10 (Reporting = 6, etc.)
-        const structureMigrated = (0, onboardingProgressUtils_1.migrateOnboardingStepStructure)(progress);
-        if (structureMigrated)
+        // 0. Migrate to new step structure:
+        //    Phase 2: steps 3,4,5 only (Reporting step removed)
+        //    Phase 3: 7=KB, 8=REP Onboarding, 9=Call Script, 10=Session Planning
+        const { modified: stepsMigrated, newCompletedSteps } = (0, onboardingProgressUtils_1.migrateToNewStepStructure)(progress.phases, progress.completedSteps ?? []);
+        if (stepsMigrated) {
+            progress.completedSteps = newCompletedSteps;
             modified = true;
-        // 1. Appliquer les flags coming soon (step 2 KYC uniquement)
+        }
+        // 1. Apply coming-soon flags (step 2 = KYC disabled)
         (0, onboardingProgressUtils_1.applyComingSoonFlags)(progress.phases);
         // 2. Synchroniser completedSteps avec l'état réel des steps dans les phases
         const computedCompletedSteps = [];
@@ -71,7 +75,6 @@ class OnboardingProgressController {
                 }
             }
         }
-        progress.completedSteps = (0, onboardingProgressUtils_1.normalizeCompletedStepIds)(progress.completedSteps);
         // Fusionner avec completedSteps existant
         for (const stepId of progress.completedSteps) {
             if (!computedCompletedSteps.includes(stepId)) {

@@ -128,6 +128,12 @@ export function migrateToNewStepStructure(
   }
 
   // ── Phase 3: rebuild with new IDs ─────────────────────────────────────────
+  // phaseStructureChanged tracks whether phase 3 was in the old layout and
+  // required rebuilding. It gates the completedSteps remap below: once the
+  // phase structure is already [7,8,9,10] the completedSteps are also already
+  // in new-ID space — re-running the remap would corrupt them (e.g. new step 7
+  // would be treated as old step 7/Reporting and dropped).
+  let phaseStructureChanged = false;
   const phase3 = phases.find((p) => p.id === 3);
   if (phase3) {
     const oldStepMap = new Map<number, Step>(phase3.steps.map((s) => [s.id, s]));
@@ -159,25 +165,33 @@ export function migrateToNewStepStructure(
       JSON.stringify(newSteps.map((s) => s.id));
     if (changed) {
       phase3.steps = newSteps;
+      phaseStructureChanged = true;
       modified = true;
     }
   }
 
   // ── Remap completedSteps ──────────────────────────────────────────────────
-  const newCompleted: number[] = [];
-  let completedModified = false;
-  for (const id of completedSteps) {
-    if (id in STEP_ID_REMAP) {
-      completedModified = true;
-      const mapped = STEP_ID_REMAP[id];
-      if (mapped !== null) newCompleted.push(mapped);
-    } else {
-      newCompleted.push(id);
+  // Only remap if the phase structure was actually in the old layout.
+  // If it was already migrated, completedSteps IDs are already in new-ID space
+  // and re-running the remap would silently corrupt them.
+  if (phaseStructureChanged) {
+    const newCompleted: number[] = [];
+    let completedModified = false;
+    for (const id of completedSteps) {
+      if (id in STEP_ID_REMAP) {
+        completedModified = true;
+        const mapped = STEP_ID_REMAP[id];
+        if (mapped !== null) newCompleted.push(mapped);
+      } else {
+        newCompleted.push(id);
+      }
     }
-  }
-  if (completedModified) modified = true;
+    if (completedModified) modified = true;
 
-  return { modified, newCompletedSteps: completedModified ? newCompleted : completedSteps };
+    return { modified, newCompletedSteps: completedModified ? newCompleted : completedSteps };
+  }
+
+  return { modified, newCompletedSteps: completedSteps };
 }
 
 /** @deprecated use migrateToNewStepStructure */
