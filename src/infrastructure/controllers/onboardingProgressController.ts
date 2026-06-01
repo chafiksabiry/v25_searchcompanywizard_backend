@@ -183,7 +183,9 @@ export class OnboardingProgressController {
       progress.markModified('phases');
       progress.markModified('completedSteps');
       await progress.save();
-      console.log('✅ Onboarding progress consistency saved to DB');
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('✅ Onboarding progress consistency saved to DB');
+      }
     }
 
     return modified;
