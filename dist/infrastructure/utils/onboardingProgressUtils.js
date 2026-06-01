@@ -7,6 +7,7 @@ exports.isPhaseComplete = isPhaseComplete;
 exports.getDefaultPhases = getDefaultPhases;
 exports.migrateToNewStepStructure = migrateToNewStepStructure;
 exports.migrateCallScriptToPhase3 = migrateCallScriptToPhase3;
+exports.repairOutOfOrderCompletions = repairOutOfOrderCompletions;
 exports.advanceAfterProfileCreated = advanceAfterProfileCreated;
 /** Steps shown as "Coming soon" in the UI — do not block phase progression */
 exports.COMING_SOON_STEP_IDS = new Set([2, 6]);
@@ -189,6 +190,36 @@ function migrateToNewStepStructure(phases, completedSteps) {
 function migrateCallScriptToPhase3(phases) {
     const { modified } = migrateToNewStepStructure(phases, []);
     return modified;
+}
+/**
+ * Detect and repair steps that were incorrectly completed by the migration
+ * bug (completedSteps remap running on already-migrated data).
+ *
+ * Rule: in Phase 3, no step with id > X should be 'completed' if step X is
+ * not yet completed (sequential dependency).
+ * Specifically: step 9 (Call Script) cannot be completed before step 8 (E-learning).
+ *
+ * Returns true if anything was corrected.
+ */
+function repairOutOfOrderCompletions(phases, completedSteps) {
+    let modified = false;
+    const newCompleted = [...completedSteps];
+    const phase3 = phases.find((p) => p.id === 3);
+    if (!phase3)
+        return { modified, completedSteps };
+    const step8 = phase3.steps.find((s) => s.id === 8);
+    const step9 = phase3.steps.find((s) => s.id === 9);
+    // If step 9 is completed but step 8 is NOT → step 9 was wrongly auto-completed
+    if (step9 && step9.status === 'completed' &&
+        step8 && step8.status !== 'completed') {
+        step9.status = 'in_progress';
+        step9.completedAt = undefined;
+        const idx = newCompleted.indexOf(9);
+        if (idx !== -1)
+            newCompleted.splice(idx, 1);
+        modified = true;
+    }
+    return { modified, completedSteps: newCompleted };
 }
 /** After step 1 is completed: phase 1 done, unlock phase 2 / step 3 */
 function advanceAfterProfileCreated(phases) {
