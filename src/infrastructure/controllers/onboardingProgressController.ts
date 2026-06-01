@@ -10,7 +10,7 @@ import {
   isActiveStep,
   isPhaseComplete,
   advanceAfterProfileCreated,
-  migrateCallScriptToPhase3,
+  migrateToNewStepStructure,
 } from '../utils/onboardingProgressUtils';
 
 export class OnboardingProgressController {
@@ -68,14 +68,19 @@ export class OnboardingProgressController {
   async ensureConsistency(progress: any): Promise<boolean> {
     let modified = false;
 
-    // 0. Migration : "Call Script" (id 6) a été déplacé de la phase 2
-    //    vers la phase 3 (après E-learning id 9, avant Session Planning id 10).
-    //    Pour les anciens enregistrements, on déplace le step 6 sans perdre
-    //    son statut.
-    const callScriptMigrated = migrateCallScriptToPhase3(progress.phases);
-    if (callScriptMigrated) modified = true;
+    // 0. Migrate to new step structure:
+    //    Phase 2: steps 3,4,5 only (Reporting step removed)
+    //    Phase 3: 7=KB, 8=REP Onboarding, 9=Call Script, 10=Session Planning
+    const { modified: stepsMigrated, newCompletedSteps } = migrateToNewStepStructure(
+      progress.phases,
+      progress.completedSteps ?? []
+    );
+    if (stepsMigrated) {
+      progress.completedSteps = newCompletedSteps;
+      modified = true;
+    }
 
-    // 1. Appliquer les flags coming soon (step 2 et 7 désactivés et mis à pending si in_progress)
+    // 1. Apply coming-soon flags (step 2 = KYC disabled)
     applyComingSoonFlags(progress.phases);
 
     // 2. Synchroniser completedSteps avec l'état réel des steps dans les phases

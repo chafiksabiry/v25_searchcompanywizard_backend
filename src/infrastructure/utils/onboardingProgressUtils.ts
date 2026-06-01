@@ -1,7 +1,7 @@
 import type { Phase, Step } from '../models/onboardingProgress';
 
 /** Steps shown as "Coming soon" in the UI — do not block phase progression */
-export const COMING_SOON_STEP_IDS = new Set([2, 7]);
+export const COMING_SOON_STEP_IDS = new Set([2, 6]);
 
 export function isActiveStep(step: Step): boolean {
   return !step.disabled && !COMING_SOON_STEP_IDS.has(step.id);
@@ -22,8 +22,7 @@ export function applyComingSoonFlags(phases: Phase[]): void {
 
 export function isPhaseComplete(phase: Phase): boolean {
   if (phase.id === 2) {
-    // Call Script (id 6) moved to phase 3 between Rep Onboarding (9) and
-    // Session Planning (10). Phase 2 now only requires Gigs/Telephony/Contacts.
+    // Phase 2 only requires Gigs / Telephony / Contacts (3, 4, 5).
     const requiredStepIds = [3, 4, 5];
     return requiredStepIds.every(
       (reqId) => phase.steps.find((s) => s.id === reqId)?.status === 'completed'
@@ -52,19 +51,17 @@ export function getDefaultPhases(): Phase[] {
         { id: 3, status: 'pending' },
         { id: 4, status: 'pending' },
         { id: 5, status: 'pending' },
-        { id: 7, status: 'pending', disabled: true },
+        { id: 6, status: 'pending', disabled: true }, // Reporting Setup — coming soon
       ],
     },
     {
       id: 3,
       status: 'pending',
       steps: [
-        { id: 8, status: 'pending' },
-        { id: 9, status: 'pending' },
-        // Call Script moved here, right after Rep Onboarding (id 9) and
-        // before Session Planning (id 10).
-        { id: 6, status: 'pending' },
-        { id: 10, status: 'pending' },
+        { id: 7, status: 'pending' },   // Knowledge Base
+        { id: 8, status: 'pending' },   // E-learning / REP Onboarding
+        { id: 9, status: 'pending' },   // Call Script
+        { id: 10, status: 'pending' },  // Session Planning
       ],
     },
     {
@@ -80,42 +77,113 @@ export function getDefaultPhases(): Phase[] {
 }
 
 /**
- * Move step 6 ("Call Script") from phase 2 to phase 3 (after step 9,
- * before step 10) for older onboarding documents created before the
- * step was re-ordered. Returns true when the document was modified.
+ * Step ID remapping from the old layout to the new one.
+ *
+ * Old → New
+ *   6 (Call Script, was in phase 2 or 3) → 9
+ *   8 (Knowledge Base)                   → 7
+ *   9 (REP Onboarding)                   → 8
+ *   7 (Reporting, disabled, now removed) → removed
  */
-export function migrateCallScriptToPhase3(phases: Phase[]): boolean {
-  const phase2 = phases.find((p) => p.id === 2);
-  const phase3 = phases.find((p) => p.id === 3);
-  if (!phase2 || !phase3) return false;
+const STEP_ID_REMAP: Record<number, number | null> = {
+  6: 9,
+  7: null, // Reporting step removed
+  8: 7,
+  9: 8,
+};
 
+/**
+ * Migrate an existing onboarding document to the new step structure:
+ *  - Phase 2: remove Reporting (old 7) step; keep only 3, 4, 5
+ *  - Phase 3: steps become 7 (KB), 8 (REP Onboarding), 9 (Call Script), 10
+ *  - completedSteps remapped accordingly
+ *
+ * Returns true when anything was modified.
+ */
+export function migrateToNewStepStructure(
+  phases: Phase[],
+  completedSteps: number[]
+): { modified: boolean; newCompletedSteps: number[] } {
   let modified = false;
 
-  // Remove from phase 2 if still present
-  const idx2 = phase2.steps.findIndex((s) => s.id === 6);
-  let existingStep: Step | undefined;
-  if (idx2 !== -1) {
-    existingStep = phase2.steps.splice(idx2, 1)[0];
-    modified = true;
+  // ── Phase 2: drop old Reporting (id 7) and old Call Script (id 6) ────────
+  // Then ensure the new Reporting step (id 6, disabled) is present.
+  const phase2 = phases.find((p) => p.id === 2);
+  if (phase2) {
+    const before = phase2.steps.length;
+    // Remove legacy step 7 (old Reporting key) and any old Call Script step 6
+    phase2.steps = phase2.steps.filter((s) => s.id !== 7);
+    // Remove old Call Script step 6 only if it hasn't been converted yet
+    // (phase 3 will receive it as step 9)
+    const hasOldCallScriptInP2 = phase2.steps.some((s) => s.id === 6);
+    if (hasOldCallScriptInP2) {
+      phase2.steps = phase2.steps.filter((s) => s.id !== 6);
+    }
+    // Ensure new Reporting step 6 (disabled) exists in phase 2
+    if (!phase2.steps.some((s) => s.id === 6)) {
+      phase2.steps.push({ id: 6, status: 'pending', disabled: true });
+      modified = true;
+    }
+    if (phase2.steps.length !== before) modified = true;
   }
 
-  // If phase 3 already has it (e.g. user already migrated), keep its
-  // existing entry but make sure it is positioned right after id 9.
-  let phase3Step = phase3.steps.find((s) => s.id === 6);
-  if (!phase3Step && existingStep) {
-    phase3Step = existingStep;
-  }
-  if (!phase3Step) return modified;
+  // ── Phase 3: rebuild with new IDs ─────────────────────────────────────────
+  const phase3 = phases.find((p) => p.id === 3);
+  if (phase3) {
+    const oldStepMap = new Map<number, Step>(phase3.steps.map((s) => [s.id, s]));
 
-  // Ensure it appears between id 9 and id 10
-  phase3.steps = phase3.steps.filter((s) => s.id !== 6);
-  const insertIdx = phase3.steps.findIndex((s) => s.id === 9);
-  if (insertIdx === -1) {
-    phase3.steps.push(phase3Step);
-  } else {
-    phase3.steps.splice(insertIdx + 1, 0, phase3Step);
+    // Also check phase 2 for a stray Call Script (old step 6)
+    const strayStep6 = phase2?.steps.find((s) => s.id === 6)
+      ?? oldStepMap.get(6);
+
+    const newSteps: Step[] = [
+      // 7 = KB (was 8)
+      oldStepMap.has(8)
+        ? { ...oldStepMap.get(8)!, id: 7 }
+        : { id: 7, status: 'pending' },
+      // 8 = REP Onboarding (was 9)
+      oldStepMap.has(9)
+        ? { ...oldStepMap.get(9)!, id: 8 }
+        : { id: 8, status: 'pending' },
+      // 9 = Call Script (was 6)
+      strayStep6
+        ? { ...strayStep6, id: 9 }
+        : { id: 9, status: 'pending' },
+      // 10 = Session Planning (unchanged)
+      oldStepMap.has(10)
+        ? oldStepMap.get(10)!
+        : { id: 10, status: 'pending' },
+    ];
+
+    const changed =
+      JSON.stringify(phase3.steps.map((s) => s.id)) !==
+      JSON.stringify(newSteps.map((s) => s.id));
+    if (changed) {
+      phase3.steps = newSteps;
+      modified = true;
+    }
   }
-  modified = true;
+
+  // ── Remap completedSteps ──────────────────────────────────────────────────
+  const newCompleted: number[] = [];
+  let completedModified = false;
+  for (const id of completedSteps) {
+    if (id in STEP_ID_REMAP) {
+      completedModified = true;
+      const mapped = STEP_ID_REMAP[id];
+      if (mapped !== null) newCompleted.push(mapped);
+    } else {
+      newCompleted.push(id);
+    }
+  }
+  if (completedModified) modified = true;
+
+  return { modified, newCompletedSteps: completedModified ? newCompleted : completedSteps };
+}
+
+/** @deprecated use migrateToNewStepStructure */
+export function migrateCallScriptToPhase3(phases: Phase[]): boolean {
+  const { modified } = migrateToNewStepStructure(phases, []);
   return modified;
 }
 
