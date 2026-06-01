@@ -189,6 +189,25 @@ export class OnboardingProgressController {
     return modified;
   }
 
+  /** Create default onboarding progress when missing (avoids 404 for new companies). */
+  private async findOrCreateProgress(
+    companyObjectId: Types.ObjectId
+  ): Promise<HydratedDocument<IOnboardingProgress>> {
+    let progress = await OnboardingProgress.findOne({ companyId: companyObjectId });
+    if (!progress) {
+      console.log(`[Onboarding] Creating progress for company ${companyObjectId.toString()}`);
+      progress = new OnboardingProgress({
+        companyId: companyObjectId,
+        currentPhase: 1,
+        completedSteps: [],
+        phases: getDefaultPhases(),
+      });
+      applyComingSoonFlags(progress.phases);
+      await progress.save();
+    }
+    return progress;
+  }
+
   // Obtenir le progrès d'onboarding d'une entreprise
   async getProgress(req: Request, res: Response) {
     try {
@@ -199,11 +218,7 @@ export class OnboardingProgressController {
       const companyObjectId = new Types.ObjectId(companyId);
       console.log('companyObjectId:', companyObjectId.toString());
 
-      const progress = await OnboardingProgress.findOne({ companyId: companyObjectId });
-
-      if (!progress) {
-        return res.status(404).json({ message: 'Onboarding progress not found' });
-      }
+      const progress = await this.findOrCreateProgress(companyObjectId);
 
       await this.ensureConsistency(progress);
 
