@@ -9,6 +9,7 @@ import mongoose from 'mongoose';
 import { CompanyModel } from '../src/infrastructure/database/models/CompanyModel';
 import { OnboardingProgress } from '../src/infrastructure/models/onboardingProgress';
 import { connectDB } from '../src/infrastructure/database/mongoose';
+import { getDefaultPhases, applyComingSoonFlags } from '../src/infrastructure/utils/onboardingProgressUtils';
 
 async function migrateOnboardingProgress() {
     try {
@@ -39,49 +40,20 @@ async function migrateOnboardingProgress() {
                 }
 
                 // Initialize onboarding progress
+                const phases = getDefaultPhases();
+                applyComingSoonFlags(phases);
+                const phase1 = phases.find((p) => p.id === 1);
+                const step1 = phase1?.steps.find((s) => s.id === 1);
+                if (step1) {
+                    step1.status = 'completed';
+                    step1.completedAt = new Date();
+                }
+
                 const initialProgress = new OnboardingProgress({
                     companyId: company._id,
                     currentPhase: 1,
-                    completedSteps: [1], // Step 1 is completed (company profile exists)
-                    phases: [
-                        {
-                            id: 1,
-                            status: 'in_progress',
-                            steps: [
-                                { id: 1, status: 'completed', completedAt: new Date() },
-                                { id: 2, status: 'pending' }
-                            ]
-                        },
-                        {
-                            id: 2,
-                            status: 'pending',
-                            steps: [
-                                { id: 3, status: 'pending' },
-                                { id: 4, status: 'pending' },
-                                { id: 5, status: 'pending' },
-                                { id: 6, status: 'pending' },
-                                { id: 7, status: 'pending' }
-                            ]
-                        },
-                        {
-                            id: 3,
-                            status: 'pending',
-                            steps: [
-                                { id: 8, status: 'pending' },
-                                { id: 9, status: 'pending' },
-                                { id: 10, status: 'pending' }
-                            ]
-                        },
-                        {
-                            id: 4,
-                            status: 'pending',
-                            steps: [
-                                { id: 11, status: 'pending' },
-                                { id: 12, status: 'pending' },
-                                { id: 13, status: 'pending' }
-                            ]
-                        }
-                    ]
+                    completedSteps: [1],
+                    phases,
                 });
 
                 await initialProgress.save();
