@@ -8,8 +8,7 @@
     "build": "tsc",
     "test": "jest",
     "export": "npm run build && node scripts/prepare-export.js",
-    "migrate:onboarding": "npx ts-node scripts/migrate-onboarding-progress.ts",
-    "migrate:onboarding-steps-2026": "npx ts-node scripts/migrate-onboarding-step-renumber-2026.ts"
+    "migrate:onboarding": "npx ts-node scripts/migrate-onboarding-progress.ts"
   },
   "dependencies": {
     "@types/multer": "^2.0.0",

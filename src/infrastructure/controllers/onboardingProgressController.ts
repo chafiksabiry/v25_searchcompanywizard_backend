@@ -10,8 +10,7 @@ import {
   isActiveStep,
   isPhaseComplete,
   advanceAfterProfileCreated,
-  migrateOnboardingStepStructure,
-  normalizeCompletedStepIds,
+  migrateCallScriptToPhase3,
 } from '../utils/onboardingProgressUtils';
 
 export class OnboardingProgressController {
@@ -69,11 +68,14 @@ export class OnboardingProgressController {
   async ensureConsistency(progress: any): Promise<boolean> {
     let modified = false;
 
-    // 0. Migration structure 2026 : phase 2 = 3–6, phase 3 = 7–10 (Reporting = 6, etc.)
-    const structureMigrated = migrateOnboardingStepStructure(progress);
-    if (structureMigrated) modified = true;
+    // 0. Migration : "Call Script" (id 6) a été déplacé de la phase 2
+    //    vers la phase 3 (après E-learning id 9, avant Session Planning id 10).
+    //    Pour les anciens enregistrements, on déplace le step 6 sans perdre
+    //    son statut.
+    const callScriptMigrated = migrateCallScriptToPhase3(progress.phases);
+    if (callScriptMigrated) modified = true;
 
-    // 1. Appliquer les flags coming soon (step 2 KYC uniquement)
+    // 1. Appliquer les flags coming soon (step 2 et 7 désactivés et mis à pending si in_progress)
     applyComingSoonFlags(progress.phases);
 
     // 2. Synchroniser completedSteps avec l'état réel des steps dans les phases
@@ -85,8 +87,6 @@ export class OnboardingProgressController {
         }
       }
     }
-
-    progress.completedSteps = normalizeCompletedStepIds(progress.completedSteps);
 
     // Fusionner avec completedSteps existant
     for (const stepId of progress.completedSteps) {
@@ -189,25 +189,6 @@ export class OnboardingProgressController {
     return modified;
   }
 
-  /** Create default onboarding progress when missing (avoids 404 for new companies). */
-  private async findOrCreateProgress(
-    companyObjectId: Types.ObjectId
-  ): Promise<HydratedDocument<IOnboardingProgress>> {
-    let progress = await OnboardingProgress.findOne({ companyId: companyObjectId });
-    if (!progress) {
-      console.log(`[Onboarding] Creating progress for company ${companyObjectId.toString()}`);
-      progress = new OnboardingProgress({
-        companyId: companyObjectId,
-        currentPhase: 1,
-        completedSteps: [],
-        phases: getDefaultPhases(),
-      });
-      applyComingSoonFlags(progress.phases);
-      await progress.save();
-    }
-    return progress;
-  }
-
   // Obtenir le progrès d'onboarding d'une entreprise
   async getProgress(req: Request, res: Response) {
     try {
@@ -218,7 +199,11 @@ export class OnboardingProgressController {
       const companyObjectId = new Types.ObjectId(companyId);
       console.log('companyObjectId:', companyObjectId.toString());
 
-      const progress = await this.findOrCreateProgress(companyObjectId);
+      const progress = await OnboardingProgress.findOne({ companyId: companyObjectId });
+
+      if (!progress) {
+        return res.status(404).json({ message: 'Onboarding progress not found' });
+      }
 
       await this.ensureConsistency(progress);
 
