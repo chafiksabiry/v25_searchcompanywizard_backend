@@ -64,6 +64,13 @@ class OnboardingProgressController {
             progress.completedSteps = newCompletedSteps;
             modified = true;
         }
+        // 0b. Repair out-of-order completions caused by the old migration bug
+        //     (e.g. step 9 marked completed before step 8 was done).
+        const { modified: repairModified, completedSteps: repairedSteps } = (0, onboardingProgressUtils_1.repairOutOfOrderCompletions)(progress.phases, progress.completedSteps ?? []);
+        if (repairModified) {
+            progress.completedSteps = repairedSteps;
+            modified = true;
+        }
         // 1. Apply coming-soon flags (step 2 = KYC disabled)
         (0, onboardingProgressUtils_1.applyComingSoonFlags)(progress.phases);
         // 2. Synchroniser completedSteps avec l'état réel des steps dans les phases

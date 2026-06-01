@@ -11,6 +11,7 @@ import {
   isPhaseComplete,
   advanceAfterProfileCreated,
   migrateToNewStepStructure,
+  repairOutOfOrderCompletions,
 } from '../utils/onboardingProgressUtils';
 
 export class OnboardingProgressController {
@@ -77,6 +78,15 @@ export class OnboardingProgressController {
     );
     if (stepsMigrated) {
       progress.completedSteps = newCompletedSteps;
+      modified = true;
+    }
+
+    // 0b. Repair out-of-order completions caused by the old migration bug
+    //     (e.g. step 9 marked completed before step 8 was done).
+    const { modified: repairModified, completedSteps: repairedSteps } =
+      repairOutOfOrderCompletions(progress.phases, progress.completedSteps ?? []);
+    if (repairModified) {
+      progress.completedSteps = repairedSteps;
       modified = true;
     }
 
