@@ -12,6 +12,7 @@ const mongoose_2 = require("./infrastructure/database/mongoose");
 const companyRoutes_1 = require("./infrastructure/routes/companyRoutes");
 const onboardingProgressRoutes_1 = require("./infrastructure/routes/onboardingProgressRoutes");
 const openaiRoutes_1 = require("./infrastructure/routes/openaiRoutes");
+const uploadsRoutes_1 = require("./infrastructure/routes/uploadsRoutes");
 const app = (0, express_1.default)();
 const port = process.env.PORT || 5001;
 // Middleware
@@ -32,6 +33,8 @@ app.use((0, morgan_1.default)('dev'));
 app.use(express_1.default.json());
 // Database connection health check middleware
 app.use((req, res, next) => {
+    if (req.path.startsWith('/api/uploads'))
+        return next();
     if (mongoose_1.default.connection.readyState !== 1 || !mongoose_1.default.connection.db) {
         return res.status(503).json({
             success: false,
@@ -44,6 +47,7 @@ app.use((req, res, next) => {
 app.use('/api/companies', companyRoutes_1.companyRoutes);
 app.use('/api/openai', openaiRoutes_1.openaiRoutes);
 app.use('/api/onboarding', onboardingProgressRoutes_1.onboardingProgressRoutes);
+app.use('/api/uploads', uploadsRoutes_1.uploadsRoutes);
 // Start server
 const startServer = () => {
     try {

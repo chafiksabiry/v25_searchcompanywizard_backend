@@ -18,6 +18,10 @@ router.post('/search', (req, res, next) => {
 router.post('/generate-profile', (req, res, next) => {
     openaiController.generateCompanyProfile(req, res, next);
 });
+// Route pour scraper une URL puis générer le profil
+router.post('/generate-from-url', (req, res, next) => {
+    openaiController.generateProfileFromUrl(req, res, next);
+});
 // Route pour générer les catégories d'unicité
 router.post('/generate-uniqueness', (req, res, next) => {
     openaiController.generateUniquenessCategories(req, res, next);
