@@ -132,22 +132,21 @@ export function migrateToNewStepStructure(
   if (phase3) {
     const oldStepMap = new Map<number, Step>(phase3.steps.map((s) => [s.id, s]));
 
-    // Also check phase 2 for a stray Call Script (old step 6)
-    const strayStep6 = phase2?.steps.find((s) => s.id === 6)
-      ?? oldStepMap.get(6);
+    // Old Call Script was step 6 — look only in phase 3 old data (not phase 2's new Reporting step)
+    const strayStep6 = oldStepMap.get(6);
 
     const newSteps: Step[] = [
-      // 7 = KB (was 8)
+      // 7 = KB (was 8) — preserve status, strip any stale disabled flag
       oldStepMap.has(8)
-        ? { ...oldStepMap.get(8)!, id: 7 }
+        ? { ...oldStepMap.get(8)!, id: 7, disabled: undefined }
         : { id: 7, status: 'pending' },
-      // 8 = REP Onboarding (was 9)
+      // 8 = REP Onboarding (was 9) — strip disabled: old step 9 may have had disabled:true
       oldStepMap.has(9)
-        ? { ...oldStepMap.get(9)!, id: 8 }
+        ? { ...oldStepMap.get(9)!, id: 8, disabled: undefined }
         : { id: 8, status: 'pending' },
-      // 9 = Call Script (was 6)
+      // 9 = Call Script — always active, never inherit disabled from old Reporting step 6
       strayStep6
-        ? { ...strayStep6, id: 9 }
+        ? { ...strayStep6, id: 9, disabled: undefined }
         : { id: 9, status: 'pending' },
       // 10 = Session Planning (unchanged)
       oldStepMap.has(10)
