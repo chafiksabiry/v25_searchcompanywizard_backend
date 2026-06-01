@@ -68,23 +68,6 @@ export class OnboardingProgressController {
   async ensureConsistency(progress: any): Promise<boolean> {
     let modified = false;
 
-    if (!Array.isArray(progress.completedSteps)) {
-      progress.completedSteps = [];
-      modified = true;
-    }
-
-    if (!Array.isArray(progress.phases) || progress.phases.length === 0) {
-      progress.phases = getDefaultPhases();
-      modified = true;
-    } else {
-      for (const phase of progress.phases) {
-        if (!Array.isArray(phase.steps)) {
-          phase.steps = [];
-          modified = true;
-        }
-      }
-    }
-
     // 0. Migration : "Call Script" (id 6) a été déplacé de la phase 2
     //    vers la phase 3 (après E-learning id 9, avant Session Planning id 10).
     //    Pour les anciens enregistrements, on déplace le step 6 sans perdre
@@ -210,35 +193,22 @@ export class OnboardingProgressController {
   async getProgress(req: Request, res: Response) {
     try {
       const { companyId } = req.params;
+      console.log('companyId reçu:', companyId);
 
-      if (!Types.ObjectId.isValid(companyId)) {
-        return res.status(400).json({ message: 'Invalid company id' });
-      }
-
+      // Convertir en ObjectId pour la requête MongoDB
       const companyObjectId = new Types.ObjectId(companyId);
+      console.log('companyObjectId:', companyObjectId.toString());
 
-      let progress = await OnboardingProgress.findOne({ companyId: companyObjectId });
+      const progress = await OnboardingProgress.findOne({ companyId: companyObjectId });
 
       if (!progress) {
-        progress = new OnboardingProgress({
-          companyId: companyObjectId,
-          currentPhase: 1,
-          completedSteps: [],
-          phases: getDefaultPhases(),
-        });
-        applyComingSoonFlags(progress.phases);
-        await progress.save();
+        return res.status(404).json({ message: 'Onboarding progress not found' });
       }
 
-      try {
-        await this.ensureConsistency(progress);
-      } catch (consistencyError) {
-        console.error('ensureConsistency failed (returning document anyway):', consistencyError);
-      }
+      await this.ensureConsistency(progress);
 
       res.json(progress);
     } catch (error) {
-      console.error('getProgress error:', error);
       res.status(500).json({ message: 'Error fetching onboarding progress', error });
     }
   }
