@@ -12,8 +12,10 @@ export function applyComingSoonFlags(phases: Phase[]): void {
     for (const step of phase.steps) {
       if (COMING_SOON_STEP_IDS.has(step.id)) {
         step.disabled = true;
-        if (step.status === 'in_progress') {
+        // Disabled steps must never appear as in_progress or completed.
+        if (step.status !== 'pending') {
           step.status = 'pending';
+          (step as any).completedAt = undefined;
         }
       }
     }

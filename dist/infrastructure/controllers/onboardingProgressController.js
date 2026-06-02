@@ -73,6 +73,12 @@ class OnboardingProgressController {
         }
         // 1. Apply coming-soon flags (step 2 = KYC disabled)
         (0, onboardingProgressUtils_1.applyComingSoonFlags)(progress.phases);
+        // 1b. Strip disabled/coming-soon step IDs from completedSteps — they must
+        //     never appear as completed regardless of how they ended up there.
+        const beforeStrip = progress.completedSteps?.length ?? 0;
+        progress.completedSteps = (progress.completedSteps ?? []).filter((id) => !Array.from(onboardingProgressUtils_1.COMING_SOON_STEP_IDS).includes(id));
+        if ((progress.completedSteps?.length ?? 0) !== beforeStrip)
+            modified = true;
         // 2. Synchroniser completedSteps avec l'état réel des steps dans les phases
         const computedCompletedSteps = [];
         for (const phase of progress.phases) {
