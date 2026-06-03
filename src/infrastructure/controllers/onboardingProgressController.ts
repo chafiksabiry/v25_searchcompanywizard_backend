@@ -341,8 +341,13 @@ export class OnboardingProgressController {
       console.log('✅ Onboarding progress saved after updateStepProgress');
 
       res.json(progress);
-    } catch (error) {
-      res.status(500).json({ message: 'Error updating step progress', error });
+    } catch (error: any) {
+      console.error('[updateStepProgress] 500 error:', error?.message, error?.stack);
+      res.status(500).json({
+        message: 'Error updating step progress',
+        error: error?.message || String(error),
+        stack: error?.stack,
+      });
     }
   }
 
