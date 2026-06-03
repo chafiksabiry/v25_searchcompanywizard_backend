@@ -288,7 +288,12 @@ class OnboardingProgressController {
             res.json(progress);
         }
         catch (error) {
-            res.status(500).json({ message: 'Error updating step progress', error });
+            console.error('[updateStepProgress] 500 error:', error?.message, error?.stack);
+            res.status(500).json({
+                message: 'Error updating step progress',
+                error: error?.message || String(error),
+                stack: error?.stack,
+            });
         }
     }
     // Compléter une étape (via query param companyId)
