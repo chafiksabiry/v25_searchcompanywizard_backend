@@ -102,6 +102,18 @@ const STEP_ID_REMAP: Record<number, number | null> = {
  *
  * Returns true when anything was modified.
  */
+/**
+ * Safe numeric-id accessor for Step objects — works for both plain objects
+ * and Mongoose subdocuments. Mongoose adds a virtual `id` getter that returns
+ * the hex string of `_id`, which would shadow our custom `id: Number` path
+ * when accessed via `s.id`.  Using `s.get('id')` (Mongoose's schema-path
+ * accessor) bypasses the virtual and returns the actual stored Number.
+ */
+function getStepNumericId(s: any): number {
+  if (s && typeof s.get === 'function') return s.get('id') as number;
+  return s.id as number;
+}
+
 export function migrateToNewStepStructure(
   phases: Phase[],
   completedSteps: number[]
@@ -114,15 +126,15 @@ export function migrateToNewStepStructure(
   if (phase2) {
     const before = phase2.steps.length;
     // Remove legacy step 7 (old Reporting key) and any old Call Script step 6
-    phase2.steps = phase2.steps.filter((s) => s.id !== 7);
+    phase2.steps = phase2.steps.filter((s) => getStepNumericId(s) !== 7);
     // Remove old Call Script step 6 only if it hasn't been converted yet
     // (phase 3 will receive it as step 9)
-    const hasOldCallScriptInP2 = phase2.steps.some((s) => s.id === 6);
+    const hasOldCallScriptInP2 = phase2.steps.some((s) => getStepNumericId(s) === 6);
     if (hasOldCallScriptInP2) {
-      phase2.steps = phase2.steps.filter((s) => s.id !== 6);
+      phase2.steps = phase2.steps.filter((s) => getStepNumericId(s) !== 6);
     }
     // Ensure new Reporting step 6 (disabled) exists in phase 2
-    if (!phase2.steps.some((s) => s.id === 6)) {
+    if (!phase2.steps.some((s) => getStepNumericId(s) === 6)) {
       phase2.steps.push({ id: 6, status: 'pending', disabled: true });
       modified = true;
     }
@@ -138,33 +150,42 @@ export function migrateToNewStepStructure(
   let phaseStructureChanged = false;
   const phase3 = phases.find((p) => p.id === 3);
   if (phase3) {
-    const oldStepMap = new Map<number, Step>(phase3.steps.map((s) => [s.id, s]));
+    // Use getStepNumericId to avoid Mongoose virtual `id` getter returning hex _id
+    const oldStepMap = new Map<number, Step>(
+      phase3.steps.map((s) => [getStepNumericId(s), s])
+    );
 
     // Old Call Script was step 6 — look only in phase 3 old data (not phase 2's new Reporting step)
     const strayStep6 = oldStepMap.get(6);
 
+    // When spreading Mongoose subdocuments, convert to plain objects first to
+    // avoid including Mongoose internals (virtuals, $__, etc.) in the new steps.
+    const toPlain = (s: any): Partial<Step> =>
+      s && typeof s.toObject === 'function' ? s.toObject() : { ...s };
+
     const newSteps: Step[] = [
       // 7 = KB (was 8) — preserve status, strip any stale disabled flag
       oldStepMap.has(8)
-        ? { ...oldStepMap.get(8)!, id: 7, disabled: undefined }
+        ? { ...toPlain(oldStepMap.get(8)!), id: 7, disabled: undefined }
         : { id: 7, status: 'pending' },
       // 8 = REP Onboarding (was 9) — strip disabled: old step 9 may have had disabled:true
       oldStepMap.has(9)
-        ? { ...oldStepMap.get(9)!, id: 8, disabled: undefined }
+        ? { ...toPlain(oldStepMap.get(9)!), id: 8, disabled: undefined }
         : { id: 8, status: 'pending' },
       // 9 = Call Script — always active, never inherit disabled from old Reporting step 6
       strayStep6
-        ? { ...strayStep6, id: 9, disabled: undefined }
+        ? { ...toPlain(strayStep6), id: 9, disabled: undefined }
         : { id: 9, status: 'pending' },
-      // 10 = Session Planning (unchanged)
+      // 10 = Session Planning (unchanged) — convert to plain object to avoid
+      // keeping a live Mongoose subdocument reference in a mixed array
       oldStepMap.has(10)
-        ? oldStepMap.get(10)!
+        ? { ...toPlain(oldStepMap.get(10)!), id: 10 }
         : { id: 10, status: 'pending' },
-    ];
+    ] as Step[];
 
-    const changed =
-      JSON.stringify(phase3.steps.map((s) => s.id)) !==
-      JSON.stringify(newSteps.map((s) => s.id));
+    const currentIds = phase3.steps.map(getStepNumericId);
+    const newIds = newSteps.map((s) => s.id);
+    const changed = JSON.stringify(currentIds) !== JSON.stringify(newIds);
     if (changed) {
       phase3.steps = newSteps;
       phaseStructureChanged = true;
@@ -222,8 +243,8 @@ export function repairOutOfOrderCompletions(
   const phase3 = phases.find((p) => p.id === 3);
   if (!phase3) return { modified, completedSteps };
 
-  const step8 = phase3.steps.find((s) => s.id === 8);
-  const step9 = phase3.steps.find((s) => s.id === 9);
+  const step8 = phase3.steps.find((s) => getStepNumericId(s) === 8);
+  const step9 = phase3.steps.find((s) => getStepNumericId(s) === 9);
 
   // If step 9 is completed but step 8 is NOT → step 9 was wrongly auto-completed
   if (
