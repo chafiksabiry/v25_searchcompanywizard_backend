@@ -18,7 +18,7 @@ const port = process.env.PORT || 5001;
 // Middleware
 app.enable('trust proxy'); // Required for Railway/Heroku proxies
 const allowedOrigins = [
-    'https://harx25pageslinks.netlify.app',
+    'https://harx.ai',
     'https://harx25register.netlify.app',
     'http://localhost:5173',
     'http://localhost:4000',
