@@ -22,7 +22,9 @@ export function applyComingSoonFlags(phases: Phase[]): void {
   }
 }
 
-export function isPhaseComplete(phase: Phase): boolean {
+export function isPhaseComplete(phase: Phase, options?: { allOptional?: boolean }): boolean {
+  // Call-center (and any all-optional account): no step is mandatory.
+  if (options?.allOptional) return true;
   if (phase.id === 1) {
     // Profile only — KYC is disabled / skippable
     return phase.steps.find((s) => s.id === 1)?.status === 'completed';
@@ -33,6 +35,10 @@ export function isPhaseComplete(phase: Phase): boolean {
   }
   // Phases 3 & 4 (engagement + activation) are fully optional / skippable
   return true;
+}
+
+export function isAllOptionalAccount(userType?: string | null): boolean {
+  return String(userType || '').toLowerCase() === 'call-center';
 }
 
 export function getDefaultPhases(): Phase[] {

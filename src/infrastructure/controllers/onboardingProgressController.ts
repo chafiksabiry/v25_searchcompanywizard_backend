@@ -9,11 +9,22 @@ import {
   getDefaultPhases,
   isActiveStep,
   isPhaseComplete,
+  isAllOptionalAccount,
   advanceAfterProfileCreated,
   migrateToNewStepStructure,
   repairOutOfOrderCompletions,
   COMING_SOON_STEP_IDS,
 } from '../utils/onboardingProgressUtils';
+
+function resolveAllOptional(req: Request): boolean {
+  const fromQuery = req.query?.userType;
+  const fromBody = (req.body as { userType?: string } | undefined)?.userType;
+  const fromHeader = req.headers['x-harx-user-type'];
+  const raw = [fromQuery, fromBody, fromHeader].find((v) => typeof v === 'string') as
+    | string
+    | undefined;
+  return isAllOptionalAccount(raw);
+}
 
 export class OnboardingProgressController {
   constructor() {
@@ -271,8 +282,11 @@ export class OnboardingProgressController {
       }
 
       if (parseInt(phaseId) > 1) {
+        const allOptional = resolveAllOptional(req);
         const previousPhases = progress.phases.filter((p: Phase) => p.id < parseInt(phaseId));
-        const incompletePreviousPhases = previousPhases.filter((p: Phase) => !isPhaseComplete(p));
+        const incompletePreviousPhases = previousPhases.filter(
+          (p: Phase) => !isPhaseComplete(p, { allOptional })
+        );
 
         if (incompletePreviousPhases.length > 0) {
           return res.status(400).json({
@@ -299,7 +313,7 @@ export class OnboardingProgressController {
 
         if (nextStep) {
           nextStep.status = 'in_progress';
-        } else if (isPhaseComplete(phase)) {
+        } else if (isPhaseComplete(phase, { allOptional: resolveAllOptional(req) })) {
           phase.status = 'completed';
           const nextPhase = progress.phases.find((p: Phase) => p.id > phase.id);
           if (nextPhase) {
@@ -391,8 +405,11 @@ export class OnboardingProgressController {
       await this.ensureConsistency(progress);
 
       if (phase > 1) {
+        const allOptional = resolveAllOptional(req);
         const previousPhases = progress.phases.filter((p: Phase) => p.id < phase);
-        const incompletePreviousPhases = previousPhases.filter((p: Phase) => !isPhaseComplete(p));
+        const incompletePreviousPhases = previousPhases.filter(
+          (p: Phase) => !isPhaseComplete(p, { allOptional })
+        );
 
         if (incompletePreviousPhases.length > 0) {
           return res.status(400).json({
