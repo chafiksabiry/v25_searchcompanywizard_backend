@@ -23,24 +23,35 @@ interface CompanyProfile {
   name: string;
   logo?: string;
   industry?: string;
+  industry_i18n?: { en: string; fr: string };
   founded?: string;
   headquarters?: string;
   overview: string;
+  overview_i18n?: { en: string; fr: string };
   mission?: string;
+  mission_i18n?: { en: string; fr: string };
   companyIntro?: string;
+  companyIntro_i18n?: { en: string; fr: string };
   culture: {
     values: string[];
+    values_i18n?: { en: string[]; fr: string[] };
     benefits: string[];
+    benefits_i18n?: { en: string[]; fr: string[] };
     workEnvironment: string;
+    workEnvironment_i18n?: { en: string; fr: string };
   };
   opportunities: {
     roles: string[];
+    roles_i18n?: { en: string[]; fr: string[] };
     growthPotential: string;
+    growthPotential_i18n?: { en: string; fr: string };
     training: string;
+    training_i18n?: { en: string; fr: string };
   };
   technology: {
     stack: string[];
     innovation: string;
+    innovation_i18n?: { en: string; fr: string };
   };
   contact: {
     email?: string;
@@ -59,6 +70,112 @@ interface CompanyProfile {
     instagram?: string;
   };
 }
+
+type UiLang = 'fr' | 'en';
+
+function normalizeUiLang(raw: unknown): UiLang {
+  const s = String(raw || '').toLowerCase();
+  return s.startsWith('en') ? 'en' : 'fr';
+}
+
+/** Normalize AI bilingual (or legacy string) text → plain (UI lang) + {en,fr}. */
+function asI18nText(
+  raw: unknown,
+  preferred: UiLang = 'fr'
+): { plain: string; i18n: { en: string; fr: string } } {
+  if (raw == null) return { plain: '', i18n: { en: '', fr: '' } };
+  if (typeof raw === 'string') {
+    const s = raw.trim();
+    return { plain: s, i18n: { en: s, fr: s } };
+  }
+  if (typeof raw === 'object') {
+    const obj = raw as { en?: unknown; fr?: unknown };
+    const en = String(obj.en || obj.fr || '').trim();
+    const fr = String(obj.fr || obj.en || '').trim();
+    const plain = preferred === 'en' ? en || fr : fr || en;
+    return { plain, i18n: { en, fr } };
+  }
+  return { plain: '', i18n: { en: '', fr: '' } };
+}
+
+function asI18nList(
+  raw: unknown,
+  preferred: UiLang = 'fr'
+): { plain: string[]; i18n: { en: string[]; fr: string[] } } {
+  if (raw == null) return { plain: [], i18n: { en: [], fr: [] } };
+  if (Array.isArray(raw)) {
+    if (raw.every((v) => typeof v === 'string')) {
+      const list = (raw as string[]).map((s) => s.trim()).filter(Boolean);
+      return { plain: list, i18n: { en: list, fr: list } };
+    }
+    const en = raw
+      .map((v: any) => String(typeof v === 'string' ? v : v?.en || v?.fr || '').trim())
+      .filter(Boolean);
+    const fr = raw
+      .map((v: any) => String(typeof v === 'string' ? v : v?.fr || v?.en || '').trim())
+      .filter(Boolean);
+    const plain = preferred === 'en' ? (en.length ? en : fr) : fr.length ? fr : en;
+    return { plain, i18n: { en, fr } };
+  }
+  if (typeof raw === 'object') {
+    const obj = raw as { en?: unknown; fr?: unknown };
+    const en = Array.isArray(obj.en) ? obj.en.map((s) => String(s).trim()).filter(Boolean) : [];
+    const fr = Array.isArray(obj.fr) ? obj.fr.map((s) => String(s).trim()).filter(Boolean) : en;
+    const plain = preferred === 'en' ? (en.length ? en : fr) : fr.length ? fr : en;
+    return { plain, i18n: { en, fr } };
+  }
+  return { plain: [], i18n: { en: [], fr: [] } };
+}
+
+const COMPANY_PROFILE_SYSTEM_PROMPT = `You are a professional company profiler. Create a detailed company profile in JSON format based ONLY on the provided website / company information.
+CRITICAL GROUNDING RULES:
+- overview, mission, industry, culture, opportunities and technology MUST reflect the actual company described in the source (website URL + scraped text).
+- Do NOT invent a generic "international services" blurb that could apply to any company.
+- If the source text is sparse, summarize what is actually present; never fabricate products, markets, or claims.
+- Prefer facts quoted or paraphrased from the site content over assumptions.
+
+IMPORTANT: All narrative / descriptive fields MUST be bilingual French AND English using objects { "en": "...", "fr": "..." }.
+The JSON response must include ALL of the following fields:
+{
+  "name": "string (legal / brand name from the site)",
+  "industry": { "en": "string", "fr": "string" },
+  "founded": "string (year)",
+  "headquarters": "string (location)",
+  "overview": { "en": "detailed company description grounded in the site", "fr": "description détaillée fidèle au site" },
+  "mission": { "en": "company mission statement grounded in the site", "fr": "mission de l'entreprise fidèle au site" },
+  "companyIntro": { "en": "short partner intro (2-3 sentences)", "fr": "intro partenaire courte (2-3 phrases)" },
+  "culture": {
+    "values": { "en": ["at least 3 values"], "fr": ["au moins 3 valeurs"] },
+    "benefits": { "en": ["at least 3 benefits"], "fr": ["au moins 3 avantages"] },
+    "workEnvironment": { "en": "detailed description", "fr": "description détaillée" }
+  },
+  "opportunities": {
+    "roles": { "en": ["at least 3 roles"], "fr": ["au moins 3 rôles"] },
+    "growthPotential": { "en": "detailed growth opportunities", "fr": "opportunités de croissance" },
+    "training": { "en": "training and development details", "fr": "formation et développement" }
+  },
+  "technology": {
+    "stack": ["array of at least 3 technologies used"],
+    "innovation": { "en": "innovation approach", "fr": "approche innovation" }
+  },
+  "contact": {
+    "website": "string (company website)",
+    "email": "string (contact email)",
+    "phone": "string (contact phone)",
+    "address": "string (complete physical address)"
+  },
+  "socialMedia": {
+    "linkedin": "string",
+    "twitter": "string",
+    "facebook": "string",
+    "instagram": "string"
+  }
+}
+
+Keep FR and EN meaning-equivalent (not word-for-word if awkward). Do not leave either language empty when the other has content.
+For phone numbers, only use numbers present in the source; format internationally when possible.
+If contact fields are not in the source, leave them as empty strings — never invent placeholders.`;
+
 
 interface UniquenessCategory {
   title: string;
@@ -456,7 +573,8 @@ export class OpenAIController {
 
   async generateProfileFromUrl(req: Request, res: Response, next: NextFunction) {
     try {
-      const { url, userId, logoUrl } = req.body;
+      const { url, userId, logoUrl, language } = req.body;
+      const uiLang = normalizeUiLang(language);
 
       if (!url || typeof url !== 'string') {
         return res.status(400).json({ success: false, message: 'A valid url is required' });
@@ -483,14 +601,16 @@ export class OpenAIController {
             'User-Agent':
               'Mozilla/5.0 (compatible; HARXProfileBot/1.0; +https://harx.ai)',
             Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9,fr;q=0.8',
+            // Prefer UI language so bilingual sites return matching content.
+            'Accept-Language':
+              uiLang === 'fr' ? 'fr-FR,fr;q=0.9,en;q=0.5' : 'en-US,en;q=0.9,fr;q=0.5',
           },
           validateStatus: (s) => s >= 200 && s < 400,
         });
         return typeof response.data === 'string' ? response.data : String(response.data ?? '');
       };
 
-      console.log(`🌐 [Scrape] Fetching ${normalizedUrl}`);
+      console.log(`🌐 [Scrape] Fetching ${normalizedUrl} (lang=${uiLang})`);
       let html = '';
       try {
         html = await fetchHtml(normalizedUrl);
@@ -618,7 +738,8 @@ export class OpenAIController {
         socialLines ? `Detected Social Media URLs (use them as-is, do not invent):\n${socialLines}` : 'NO SOCIAL MEDIA URLS FOUND on the page — leave social media fields as empty strings.',
         footerText ? `Footer Content (inspect this carefully for contacts, year, address, social, legal name):\n${footerText}` : '',
         combinedSiteText ? `Full Site Content (read everything to extract overview, mission, services, values, team, etc.):\n${combinedSiteText}` : '',
-        `STRICT RULE: For contact.email, contact.phone, contact.address, socialMedia.* and founded fields, ONLY use values that appear above as "Detected ..." or that you can quote verbatim from the Footer/Full Site Content. If a value was not detected and is not present in the text, output an empty string "" for that field. NEVER invent placeholders like "+33 1 23 45 67 89", "123 Rue …", "info@example.com", "2010", etc. For overview/mission/culture/opportunities/technology, base your answer ONLY on the Full Site Content above; do not invent facts.`,
+        `STRICT RULE: For contact.email, contact.phone, contact.address, socialMedia.* and founded fields, ONLY use values that appear above as "Detected ..." or that you can quote verbatim from the Footer/Full Site Content. If a value was not detected and is not present in the text, output an empty string "" for that field. NEVER invent placeholders like "+33 1 23 45 67 89", "123 Rue …", "info@example.com", "2010", etc. For overview/mission/culture/opportunities/technology, base your answer ONLY on the Full Site Content for THIS website (${rootUrl}); do not invent facts and do not reuse a generic template.`,
+        `UI LANGUAGE: The user interface is in ${uiLang === 'fr' ? 'French' : 'English'}. Write high-quality ${uiLang === 'fr' ? 'French' : 'English'} in the "${uiLang}" fields; still provide the other language.`,
       ]
         .filter(Boolean)
         .join('\n');
@@ -628,6 +749,7 @@ export class OpenAIController {
         userId,
         logoUrl: inferredLogo,
         persist: false,
+        language: uiLang,
         _scrapedContact: contactData,
         _scrapedFounded: foundedYear,
         _websiteUrl: rootUrl,
@@ -648,7 +770,17 @@ export class OpenAIController {
         logoUrl: req.body.logoUrl
       });
 
-      const { companyInfo, userId, logoUrl, persist, _scrapedContact, _scrapedFounded, _websiteUrl } = req.body;
+      const {
+        companyInfo,
+        userId,
+        logoUrl,
+        persist,
+        language,
+        _scrapedContact,
+        _scrapedFounded,
+        _websiteUrl,
+      } = req.body;
+      const uiLang = normalizeUiLang(language);
 
       if (persist === true) {
         console.warn('⚠️ [AI] persist=true ignored — use POST /api/companies to save the company');
@@ -672,6 +804,10 @@ export class OpenAIController {
 
       let profileData: any;
       let usedFallback = false;
+      const userPrompt = `Generate a bilingual (FR + EN) JSON company profile grounded ONLY in this source material.
+Primary UI language: ${uiLang}. Put the best ${uiLang === 'fr' ? 'French' : 'English'} wording in the "${uiLang}" keys.
+Source material:
+${companyInfo}`;
 
       try {
         const openai = new OpenAI({ apiKey: apiKey! });
@@ -683,60 +819,15 @@ export class OpenAIController {
         messages: [
           {
             role: "system",
-            content: `You are a professional company profiler. Create a detailed company profile in JSON format based on the provided information. 
-            The JSON response must include ALL of the following fields:
-            {
-              "name": "string",
-              "industry": "string",
-              "founded": "string (year)",
-              "headquarters": "string (location)",
-              "overview": "string (detailed company description)",
-              "mission": "string (company mission statement)",
-              "culture": {
-                "values": ["array of at least 3 company values"],
-                "benefits": ["array of at least 3 company benefits"],
-                "workEnvironment": "string (detailed description)"
-              },
-              "opportunities": {
-                "roles": ["array of at least 3 available roles"],
-                "growthPotential": "string (detailed growth opportunities)",
-                "training": "string (training and development details)"
-              },
-              "technology": {
-                "stack": ["array of at least 3 technologies used"],
-                "innovation": "string (innovation approach)"
-              },
-              "contact": {
-                "website": "string (company website)",
-                "email": "string (contact email)",
-                "phone": "string (contact phone - search thoroughly for main business phone, customer service number, or headquarters phone. Include country code if available. Format as international number when possible)",
-                "address": "string (complete physical address with street, city, state/province, postal code, country)"
-              },
-              "socialMedia": {
-                "linkedin": "string (LinkedIn company page URL)",
-                "twitter": "string (Twitter/X company handle URL)",
-                "facebook": "string (Facebook company page URL - optional)",
-                "instagram": "string (Instagram company account URL - optional)"
-              }
-            }
-            
-            IMPORTANT: For phone numbers, search extensively through the provided information including:
-            - Main business phone numbers
-            - Customer service numbers
-            - Headquarters contact numbers
-            - Support hotlines
-            - Regional office numbers
-            Always format phone numbers in international format when possible (e.g., +1-555-123-4567).
-            
-            If any information is not explicitly provided, make reasonable assumptions based on the company's industry and description.`,
+            content: COMPANY_PROFILE_SYSTEM_PROMPT,
           },
           {
             role: "user",
-            content: `Generate a JSON company profile for: ${companyInfo}`,
+            content: userPrompt,
           },
         ],
-        temperature: 0.3,
-        max_tokens: 2200,
+        temperature: 0.2,
+        max_tokens: 3200,
       });
 
         const content = response.choices[0]?.message?.content;
@@ -751,9 +842,9 @@ export class OpenAIController {
         const anthropic = new Anthropic({ apiKey: anthropicKey });
         const anthropicResponse = await anthropic.messages.create({
           model: anthropicModel,
-          max_tokens: anthropicMaxTokens,
-          system: "You are a professional company profiler. Respond ONLY with a valid JSON object matching the requested schema.",
-          messages: [{ role: "user", content: `Generate a JSON company profile for: ${companyInfo}` }],
+          max_tokens: Math.max(anthropicMaxTokens, 4000),
+          system: COMPANY_PROFILE_SYSTEM_PROMPT + "\nRespond ONLY with a valid JSON object matching the requested schema.",
+          messages: [{ role: "user", content: userPrompt }],
         });
 
         const rawContent = anthropicResponse.content[0].type === 'text' ? anthropicResponse.content[0].text : '';
@@ -763,8 +854,6 @@ export class OpenAIController {
       }
 
       console.log('🔍 [AI] Finalizing profile with data from provider...');
-
-      console.log('📝 [AI] Skipping company intro generation for now, using default.');
 
       const scraped = _scrapedContact as
         | {
@@ -831,25 +920,57 @@ export class OpenAIController {
         return m[1];
       };
 
+      const industry = asI18nText(profileData.industry, uiLang);
+      const overview = asI18nText(profileData.overview, uiLang);
+      const mission = asI18nText(profileData.mission, uiLang);
+      const companyIntro = asI18nText(
+        profileData.companyIntro || { en: 'AI generated', fr: 'Généré par AI' },
+        uiLang
+      );
+      const cultureValues = asI18nList(profileData.culture?.values, uiLang);
+      const cultureBenefits = asI18nList(profileData.culture?.benefits, uiLang);
+      const workEnvironment = asI18nText(profileData.culture?.workEnvironment, uiLang);
+      const oppRoles = asI18nList(profileData.opportunities?.roles, uiLang);
+      const growthPotential = asI18nText(profileData.opportunities?.growthPotential, uiLang);
+      const training = asI18nText(profileData.opportunities?.training, uiLang);
+      const innovation = asI18nText(profileData.technology?.innovation, uiLang);
+
       const finalProfile: CompanyProfile = {
         userId: userId || '681a91212c1ca099fe2b17df',
-        companyIntro: "Généré par AI",
-        ...profileData,
+        name: String(profileData.name || '').trim(),
         founded: pickFounded(profileData.founded),
+        headquarters: profileData.headquarters || '',
+        industry: industry.plain,
+        industry_i18n: industry.i18n,
+        overview: overview.plain,
+        overview_i18n: overview.i18n,
+        mission: mission.plain,
+        mission_i18n: mission.i18n,
+        companyIntro: companyIntro.plain,
+        companyIntro_i18n: companyIntro.i18n,
         logo: logoUrl || profileData.logo,
         culture: {
-          values: profileData.culture?.values || [],
-          benefits: profileData.culture?.benefits || [],
-          workEnvironment: profileData.culture?.workEnvironment || "",
+          values: cultureValues.plain,
+          values_i18n: cultureValues.i18n,
+          benefits: cultureBenefits.plain,
+          benefits_i18n: cultureBenefits.i18n,
+          workEnvironment: workEnvironment.plain,
+          workEnvironment_i18n: workEnvironment.i18n,
         },
         opportunities: {
-          roles: profileData.opportunities?.roles || [],
-          growthPotential: profileData.opportunities?.growthPotential || "",
-          training: profileData.opportunities?.training || "",
+          roles: oppRoles.plain,
+          roles_i18n: oppRoles.i18n,
+          growthPotential: growthPotential.plain,
+          growthPotential_i18n: growthPotential.i18n,
+          training: training.plain,
+          training_i18n: training.i18n,
         },
         technology: {
-          stack: profileData.technology?.stack || [],
-          innovation: profileData.technology?.innovation || "",
+          stack: Array.isArray(profileData.technology?.stack)
+            ? profileData.technology.stack.filter((s: unknown) => typeof s === 'string')
+            : [],
+          innovation: innovation.plain,
+          innovation_i18n: innovation.i18n,
         },
         contact: {
           email: pickEmail(profileData.contact?.email),
