@@ -234,13 +234,25 @@ export class OnboardingProgressController {
       const companyObjectId = new Types.ObjectId(companyId);
       console.log('companyObjectId:', companyObjectId.toString());
 
-      const progress = await OnboardingProgress.findOne({ companyId: companyObjectId });
+      let progress = await OnboardingProgress.findOne({ companyId: companyObjectId });
 
       if (!progress) {
-        return res.status(404).json({ message: 'Onboarding progress not found' });
+        // Company may still exist after a manual progress wipe — re-init empty onboarding.
+        const company = await CompanyModel.findById(companyObjectId);
+        if (!company) {
+          return res.status(404).json({ message: 'Onboarding progress not found' });
+        }
+        progress = new OnboardingProgress({
+          companyId: companyObjectId,
+          currentPhase: 1,
+          completedSteps: [],
+          phases: getDefaultPhases(),
+        });
+        await this.ensureConsistency(progress);
+        await progress.save();
+      } else {
+        await this.ensureConsistency(progress);
       }
-
-      await this.ensureConsistency(progress);
 
       res.json(progress);
     } catch (error) {
