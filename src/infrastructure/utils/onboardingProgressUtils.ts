@@ -25,7 +25,7 @@ export function applyComingSoonFlags(phases: Phase[]): void {
 /** Required step IDs for a company phase to count as completed. */
 export const PHASE_REQUIRED_STEP_IDS: Record<number, number[]> = {
   1: [1], // company profile (KYC coming-soon)
-  2: [3, 4], // gig + telephony — do not skip past telephony
+  2: [3, 4, 5], // gig + telephony + contacts
   3: [7, 8, 9, 10],
   4: [11, 12, 13],
 };
