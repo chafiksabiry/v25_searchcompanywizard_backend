@@ -9,6 +9,13 @@ const mongoose_1 = require("mongoose");
 const CompanyModel_1 = require("../database/models/CompanyModel");
 const mongoose_2 = __importDefault(require("mongoose"));
 const onboardingProgressUtils_1 = require("../utils/onboardingProgressUtils");
+function resolveAllOptional(req) {
+    const fromQuery = req.query?.userType;
+    const fromBody = req.body?.userType;
+    const fromHeader = req.headers['x-harx-user-type'];
+    const raw = [fromQuery, fromBody, fromHeader].find((v) => typeof v === 'string');
+    return (0, onboardingProgressUtils_1.isAllOptionalAccount)(raw);
+}
 class OnboardingProgressController {
     constructor() {
         this.initializeProgress = this.initializeProgress.bind(this);
@@ -186,11 +193,25 @@ class OnboardingProgressController {
             // Convertir en ObjectId pour la requête MongoDB
             const companyObjectId = new mongoose_1.Types.ObjectId(companyId);
             console.log('companyObjectId:', companyObjectId.toString());
-            const progress = await onboardingProgress_1.OnboardingProgress.findOne({ companyId: companyObjectId });
+            let progress = await onboardingProgress_1.OnboardingProgress.findOne({ companyId: companyObjectId });
             if (!progress) {
-                return res.status(404).json({ message: 'Onboarding progress not found' });
+                // Company may still exist after a manual progress wipe — re-init empty onboarding.
+                const company = await CompanyModel_1.CompanyModel.findById(companyObjectId);
+                if (!company) {
+                    return res.status(404).json({ message: 'Onboarding progress not found' });
+                }
+                progress = new onboardingProgress_1.OnboardingProgress({
+                    companyId: companyObjectId,
+                    currentPhase: 1,
+                    completedSteps: [],
+                    phases: (0, onboardingProgressUtils_1.getDefaultPhases)(),
+                });
+                await this.ensureConsistency(progress);
+                await progress.save();
             }
-            await this.ensureConsistency(progress);
+            else {
+                await this.ensureConsistency(progress);
+            }
             res.json(progress);
         }
         catch (error) {
@@ -225,8 +246,9 @@ class OnboardingProgressController {
                 return res.status(404).json({ message: 'Step not found' });
             }
             if (parseInt(phaseId) > 1) {
+                const allOptional = resolveAllOptional(req);
                 const previousPhases = progress.phases.filter((p) => p.id < parseInt(phaseId));
-                const incompletePreviousPhases = previousPhases.filter((p) => !(0, onboardingProgressUtils_1.isPhaseComplete)(p));
+                const incompletePreviousPhases = previousPhases.filter((p) => !(0, onboardingProgressUtils_1.isPhaseComplete)(p, { allOptional }));
                 if (incompletePreviousPhases.length > 0) {
                     return res.status(400).json({
                         message: 'Cannot modify steps in phase ' + phaseId + ' because previous phases are not completed',
@@ -249,7 +271,7 @@ class OnboardingProgressController {
                 if (nextStep) {
                     nextStep.status = 'in_progress';
                 }
-                else if ((0, onboardingProgressUtils_1.isPhaseComplete)(phase)) {
+                else if ((0, onboardingProgressUtils_1.isPhaseComplete)(phase, { allOptional: resolveAllOptional(req) })) {
                     phase.status = 'completed';
                     const nextPhase = progress.phases.find((p) => p.id > phase.id);
                     if (nextPhase) {
@@ -330,8 +352,9 @@ class OnboardingProgressController {
             }
             await this.ensureConsistency(progress);
             if (phase > 1) {
+                const allOptional = resolveAllOptional(req);
                 const previousPhases = progress.phases.filter((p) => p.id < phase);
-                const incompletePreviousPhases = previousPhases.filter((p) => !(0, onboardingProgressUtils_1.isPhaseComplete)(p));
+                const incompletePreviousPhases = previousPhases.filter((p) => !(0, onboardingProgressUtils_1.isPhaseComplete)(p, { allOptional }));
                 if (incompletePreviousPhases.length > 0) {
                     return res.status(400).json({
                         message: 'Cannot access phase ' + phase + ' because previous phases are not completed',
