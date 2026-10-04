@@ -48,7 +48,8 @@ class CreateCompanyUseCase {
         const userId = companyData.userId
             ? String(companyData.userId)
             : '';
-        // 1) User already owns a company → update it (publish is idempotent).
+        // Same user republishing → update their company. Name uniqueness is NOT required:
+        // multiple accounts may publish the same company name (e.g. Samsung demo).
         if (userId && repo.findOneByUserId) {
             const byUser = await repo.findOneByUserId(userId);
             const byUserId = companyDocId(byUser);
@@ -56,21 +57,6 @@ class CreateCompanyUseCase {
                 return this.updateExisting(byUserId, companyData);
             }
         }
-        // 2) Same name already exists → update if unowned or owned by this user.
-        const existingByName = companyData.name
-            ? await this.companyRepository.findByName(companyData.name)
-            : null;
-        const byNameId = companyDocId(existingByName);
-        if (byNameId && existingByName) {
-            const owner = existingByName.userId
-                ? String(existingByName.userId)
-                : '';
-            if (owner && userId && owner !== userId) {
-                throw new Error('Company with this name already exists');
-            }
-            return this.updateExisting(byNameId, companyData);
-        }
-        // 3) Create new company
         const newCompany = await this.companyRepository.create(companyData);
         const newId = companyDocId(newCompany);
         if (newId) {

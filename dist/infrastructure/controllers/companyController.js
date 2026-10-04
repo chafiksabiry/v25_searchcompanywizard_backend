@@ -17,13 +17,6 @@ class CompanyController {
             });
         }
         catch (error) {
-            const message = String(error?.message || '');
-            if (/already exists/i.test(message)) {
-                return res.status(409).json({
-                    success: false,
-                    message: 'Une entreprise avec ce nom existe déjà pour un autre compte.',
-                });
-            }
             next(error);
         }
     }
