@@ -13,7 +13,14 @@ export class CompanyController {
         message: 'Company created successfully',
         data: company,
       });
-    } catch (error) {
+    } catch (error: any) {
+      const message = String(error?.message || '');
+      if (/already exists/i.test(message)) {
+        return res.status(409).json({
+          success: false,
+          message,
+        });
+      }
       next(error);
     }
   }
@@ -117,16 +124,14 @@ export class CompanyController {
   async getCompanyByUserId(req: Request, res: Response, next: NextFunction) {
     try {
       const company = await companyService.getCompanyByUserId(req.params.userId);
-      if (!company) {
-        return res.status(404).json({
-          success: false,
-          message: 'Company not found for this user',
-        });
-      }
+      // Optional: a user may not have created a company yet (onboarding step 1).
+      // Return 200 + null instead of 404 so clients do not treat it as an error.
       res.status(200).json({
         success: true,
-        message: 'Company retrieved successfully',
-        data: company,
+        message: company
+          ? 'Company retrieved successfully'
+          : 'No company for this user yet',
+        data: company || null,
       });
     } catch (error) {
       next(error);

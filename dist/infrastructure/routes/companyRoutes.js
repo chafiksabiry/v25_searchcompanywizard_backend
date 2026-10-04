@@ -9,9 +9,10 @@ exports.companyRoutes = router;
 const companyController = new companyController_1.CompanyController();
 router.post('/', validation_1.validateCompany, companyController.createCompany);
 router.get('/', companyController.getAllCompanies);
-router.get('/:id', companyController.getCompanyById);
-router.get('/:id/details', companyController.getCompanyDetails);
+// Static segments before /:id
 router.get('/user/:userId', companyController.getCompanyByUserId);
+router.get('/:id/details', companyController.getCompanyDetails);
+router.get('/:id', companyController.getCompanyById);
 router.put('/:id', validation_1.validateCompany, companyController.updateCompany);
 router.put('/:id/subscription', companyController.updateSubscription);
 router.delete('/:id', companyController.deleteCompany);
