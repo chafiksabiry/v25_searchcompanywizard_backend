@@ -27,8 +27,12 @@ export class MongoCompanyRepository implements ICompanyRepository {
     return await this.companyModel.findById(id);
   }
 
-  async update(id: string, data: Partial<Company>): Promise<Company | null> {
-    return await this.companyModel.findByIdAndUpdate(id, data, {
+  async update(id: string, data: Partial<Company> | Record<string, unknown>): Promise<Company | null> {
+    const update =
+      data && typeof data === 'object' && ('$set' in data || '$unset' in data || '$push' in data)
+        ? data
+        : { $set: data };
+    return await this.companyModel.findByIdAndUpdate(id, update as any, {
       new: true,
       runValidators: true,
     });

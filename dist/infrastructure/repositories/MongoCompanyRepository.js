@@ -20,7 +20,10 @@ class MongoCompanyRepository {
         return await this.companyModel.findById(id);
     }
     async update(id, data) {
-        return await this.companyModel.findByIdAndUpdate(id, data, {
+        const update = data && typeof data === 'object' && ('$set' in data || '$unset' in data || '$push' in data)
+            ? data
+            : { $set: data };
+        return await this.companyModel.findByIdAndUpdate(id, update, {
             new: true,
             runValidators: true,
         });
