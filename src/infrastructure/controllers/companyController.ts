@@ -8,9 +8,11 @@ export class CompanyController {
   async createCompany(req: Request, res: Response, next: NextFunction) {
     try {
       const company = await companyService.createCompany(req.body);
-      res.status(201).json({
+      // Upsert: create or update existing (same user / same name draft).
+      const status = 200;
+      res.status(status).json({
         success: true,
-        message: 'Company created successfully',
+        message: 'Company saved successfully',
         data: company,
       });
     } catch (error: any) {
@@ -18,7 +20,8 @@ export class CompanyController {
       if (/already exists/i.test(message)) {
         return res.status(409).json({
           success: false,
-          message,
+          message:
+            'Une entreprise avec ce nom existe déjà pour un autre compte.',
         });
       }
       next(error);
