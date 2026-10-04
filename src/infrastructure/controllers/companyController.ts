@@ -15,15 +15,7 @@ export class CompanyController {
         message: 'Company saved successfully',
         data: company,
       });
-    } catch (error: any) {
-      const message = String(error?.message || '');
-      if (/already exists/i.test(message)) {
-        return res.status(409).json({
-          success: false,
-          message:
-            'Une entreprise avec ce nom existe déjà pour un autre compte.',
-        });
-      }
+    } catch (error) {
       next(error);
     }
   }
