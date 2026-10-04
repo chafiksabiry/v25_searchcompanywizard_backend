@@ -20,33 +20,68 @@ const socialMediaSchema = zod_1.z.object({
     facebook: optionalUrl,
     instagram: optionalUrl
 }).optional();
-const companySchema = zod_1.z.object({
+const i18nStringSchema = zod_1.z
+    .object({
+    en: zod_1.z.string().optional(),
+    fr: zod_1.z.string().optional(),
+})
+    .optional();
+const i18nStringListSchema = zod_1.z
+    .object({
+    en: zod_1.z.array(zod_1.z.string()).optional(),
+    fr: zod_1.z.array(zod_1.z.string()).optional(),
+})
+    .optional();
+const companySchema = zod_1.z
+    .object({
     userId: zod_1.z.string().optional(),
     name: zod_1.z.string().min(1),
     logo: optionalUrl,
     industry: zod_1.z.string().optional(),
+    industry_i18n: i18nStringSchema,
     founded: zod_1.z.string().optional(),
     headquarters: zod_1.z.string().optional(),
     overview: zod_1.z.string().min(1),
+    overview_i18n: i18nStringSchema,
     mission: zod_1.z.string().optional(),
-    culture: zod_1.z.object({
+    mission_i18n: i18nStringSchema,
+    companyIntro: zod_1.z.string().optional(),
+    companyIntro_i18n: i18nStringSchema,
+    culture: zod_1.z
+        .object({
         values: zod_1.z.array(zod_1.z.string()).optional().default([]),
+        values_i18n: i18nStringListSchema,
         benefits: zod_1.z.array(zod_1.z.string()).optional().default([]),
-        workEnvironment: zod_1.z.string().optional().default("")
-    }).optional().default({}),
-    opportunities: zod_1.z.object({
+        benefits_i18n: i18nStringListSchema,
+        workEnvironment: zod_1.z.string().optional().default(""),
+        workEnvironment_i18n: i18nStringSchema,
+    })
+        .optional()
+        .default({}),
+    opportunities: zod_1.z
+        .object({
         roles: zod_1.z.array(zod_1.z.string()).optional().default([]),
+        roles_i18n: i18nStringListSchema,
         growthPotential: zod_1.z.string().optional().default(""),
-        training: zod_1.z.string().optional().default("")
-    }).optional().default({}),
-    technology: zod_1.z.object({
+        growthPotential_i18n: i18nStringSchema,
+        training: zod_1.z.string().optional().default(""),
+        training_i18n: i18nStringSchema,
+    })
+        .optional()
+        .default({}),
+    technology: zod_1.z
+        .object({
         stack: zod_1.z.array(zod_1.z.string()).optional().default([]),
-        innovation: zod_1.z.string().optional().default("")
-    }).optional().default({}),
+        innovation: zod_1.z.string().optional().default(""),
+        innovation_i18n: i18nStringSchema,
+    })
+        .optional()
+        .default({}),
     contact: contactSchema.optional().default({}),
     socialMedia: socialMediaSchema.optional().default({}),
-    differentiators: zod_1.z.array(zod_1.z.string()).optional().default([])
-});
+    differentiators: zod_1.z.array(zod_1.z.string()).optional().default([]),
+})
+    .passthrough();
 const validateCompany = (req, res, next) => {
     try {
         companySchema.parse(req.body);

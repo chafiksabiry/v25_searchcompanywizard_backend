@@ -4,6 +4,7 @@ exports.CompanyService = void 0;
 const CreateCompanyUseCase_1 = require("../../application/use-cases/company/CreateCompanyUseCase");
 const companyRepository_1 = require("../repositories/companyRepository");
 const onboardingProgress_1 = require("../models/onboardingProgress");
+const companyI18nRepair_1 = require("./companyI18nRepair");
 class CompanyService {
     constructor() {
         this.createCompanyUseCase = new CreateCompanyUseCase_1.CreateCompanyUseCase(companyRepository_1.companyRepository);
@@ -18,18 +19,41 @@ class CompanyService {
         return await companyRepository_1.companyRepository.findById(id);
     }
     async getCompanyDetails(id) {
-        return await companyRepository_1.companyRepository.findById(id);
+        const company = await companyRepository_1.companyRepository.findById(id);
+        if (!company)
+            return null;
+        const plain = typeof company.toObject === 'function'
+            ? company.toObject()
+            : company;
+        if (!(0, companyI18nRepair_1.companyNeedsI18nRepair)(plain))
+            return company;
+        const repaired = await (0, companyI18nRepair_1.repairCompanyI18n)(plain);
+        if (repaired === plain)
+            return company;
+        // Persist repaired bilingual fields so EN/FR switch works next time without re-AI.
+        const updated = await companyRepository_1.companyRepository.update(id, {
+            industry: repaired.industry,
+            industry_i18n: repaired.industry_i18n,
+            overview: repaired.overview,
+            overview_i18n: repaired.overview_i18n,
+            mission: repaired.mission,
+            mission_i18n: repaired.mission_i18n,
+            companyIntro: repaired.companyIntro,
+            companyIntro_i18n: repaired.companyIntro_i18n,
+        });
+        return updated || repaired;
     }
     async getCompanyByUserId(userId) {
         return await companyRepository_1.companyRepository.findOneByUserId(userId);
     }
     async updateCompany(id, companyData) {
-        // Fonction récursive pour mettre à jour les champs imbriqués
+        // Flatten to dotted paths under $set so partial nested updates
+        // (e.g. only overview_i18n.fr) do not wipe the other language side.
         const flattenData = (data, prefix = '') => {
             let result = {};
-            for (const [key, value] of Object.entries(data)) {
+            for (const [key, value] of Object.entries(data || {})) {
                 const newKey = prefix ? `${prefix}.${key}` : key;
-                if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+                if (value && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date)) {
                     result = { ...result, ...flattenData(value, newKey) };
                 }
                 else {
@@ -38,10 +62,7 @@ class CompanyService {
             }
             return result;
         };
-        // Aplatir les données de l'entreprise
-        const updateData = flattenData(companyData);
-        // Appliquer la mise à jour
-        return await companyRepository_1.companyRepository.update(id, updateData);
+        return await companyRepository_1.companyRepository.update(id, { $set: flattenData(companyData) });
     }
     async deleteCompany(id) {
         await onboardingProgress_1.OnboardingProgress.deleteOne({ companyId: id });

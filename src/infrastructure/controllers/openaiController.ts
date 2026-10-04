@@ -85,17 +85,49 @@ function asI18nText(
 ): { plain: string; i18n: { en: string; fr: string } } {
   if (raw == null) return { plain: '', i18n: { en: '', fr: '' } };
   if (typeof raw === 'string') {
+    // Legacy single-language string: keep preferred side only; other filled later.
     const s = raw.trim();
-    return { plain: s, i18n: { en: s, fr: s } };
+    return {
+      plain: s,
+      i18n: preferred === 'en' ? { en: s, fr: '' } : { en: '', fr: s },
+    };
   }
   if (typeof raw === 'object') {
     const obj = raw as { en?: unknown; fr?: unknown };
-    const en = String(obj.en || obj.fr || '').trim();
-    const fr = String(obj.fr || obj.en || '').trim();
+    const en = String(obj.en || '').trim();
+    const fr = String(obj.fr || '').trim();
     const plain = preferred === 'en' ? en || fr : fr || en;
     return { plain, i18n: { en, fr } };
   }
   return { plain: '', i18n: { en: '', fr: '' } };
+}
+
+function i18nPairIncomplete(i18n: { en?: string; fr?: string } | undefined): boolean {
+  const en = String(i18n?.en || '').trim();
+  const fr = String(i18n?.fr || '').trim();
+  if (!en && !fr) return false;
+  if (!en || !fr) return true;
+  return en === fr;
+}
+
+/** Fill missing EN/FR sides after AI generation so language switch shows real content. */
+async function ensureDistinctBilingualProfile(
+  profile: CompanyProfile
+): Promise<CompanyProfile> {
+  const needs =
+    i18nPairIncomplete(profile.industry_i18n) ||
+    i18nPairIncomplete(profile.overview_i18n) ||
+    i18nPairIncomplete(profile.mission_i18n) ||
+    i18nPairIncomplete(profile.companyIntro_i18n);
+  if (!needs || !apiKey) return profile;
+
+  try {
+    const { repairCompanyI18n } = await import('../services/companyI18nRepair');
+    return (await repairCompanyI18n(profile as any)) as CompanyProfile;
+  } catch (err: any) {
+    console.warn('[OpenAI] ensureDistinctBilingualProfile failed:', err?.message);
+    return profile;
+  }
 }
 
 function asI18nList(
@@ -188,7 +220,8 @@ interface UniquenessCategory {
 export class OpenAIController {
   async searchCompanies(req: Request, res: Response, next: NextFunction) {
     try {
-      const { query } = req.body;
+      const { query, language } = req.body;
+      const uiLang = normalizeUiLang(language);
 
       if (!query) {
         return res.status(400).json({
@@ -197,8 +230,8 @@ export class OpenAIController {
         });
       }
 
-      console.log(`🔍 [OpenAI] Proxied Google Search for: "${query}"`);
-      const results = await googleSearchService.search(query);
+      console.log(`🔍 [OpenAI] Proxied Google Search for: "${query}" (lang=${uiLang})`);
+      const results = await googleSearchService.search(query, uiLang);
 
       res.status(200).json({
         success: true,
@@ -986,10 +1019,12 @@ ${companyInfo}`;
         },
       };
 
+      const bilingualProfile = await ensureDistinctBilingualProfile(finalProfile);
+
       // Preview only — persistence happens on POST /companies (Publish Company)
       res.status(200).json({
         success: true,
-        data: finalProfile,
+        data: bilingualProfile,
         provider: usedFallback ? 'anthropic' : 'openai'
       });
     } catch (error: any) {
