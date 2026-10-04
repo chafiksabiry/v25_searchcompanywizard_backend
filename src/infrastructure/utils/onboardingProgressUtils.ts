@@ -22,19 +22,23 @@ export function applyComingSoonFlags(phases: Phase[]): void {
   }
 }
 
+/** Required step IDs for a company phase to count as completed. */
+export const PHASE_REQUIRED_STEP_IDS: Record<number, number[]> = {
+  1: [1], // company profile (KYC coming-soon)
+  2: [3, 4], // gig + telephony — do not skip past telephony
+  3: [7, 8, 9, 10],
+  4: [11, 12, 13],
+};
+
 export function isPhaseComplete(phase: Phase, options?: { allOptional?: boolean }): boolean {
   // Call-center (and any all-optional account): no step is mandatory.
   if (options?.allOptional) return true;
-  if (phase.id === 1) {
-    // Profile only — KYC is disabled / skippable
-    return phase.steps.find((s) => s.id === 1)?.status === 'completed';
-  }
-  if (phase.id === 2) {
-    // Create Gigs only — Telephony / Contacts / Reporting are optional
-    return phase.steps.find((s) => s.id === 3)?.status === 'completed';
-  }
-  // Phases 3 & 4 (engagement + activation) are fully optional / skippable
-  return true;
+  const required = PHASE_REQUIRED_STEP_IDS[phase.id] || [];
+  if (required.length === 0) return false;
+  return required.every((stepId) => {
+    const step = phase.steps.find((s) => s.id === stepId);
+    return step?.status === 'completed';
+  });
 }
 
 export function isAllOptionalAccount(userType?: string | null): boolean {

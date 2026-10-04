@@ -1,9 +1,10 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.COMING_SOON_STEP_IDS = void 0;
+exports.PHASE_REQUIRED_STEP_IDS = exports.COMING_SOON_STEP_IDS = void 0;
 exports.isActiveStep = isActiveStep;
 exports.applyComingSoonFlags = applyComingSoonFlags;
 exports.isPhaseComplete = isPhaseComplete;
+exports.isAllOptionalAccount = isAllOptionalAccount;
 exports.getDefaultPhases = getDefaultPhases;
 exports.migrateToNewStepStructure = migrateToNewStepStructure;
 exports.migrateCallScriptToPhase3 = migrateCallScriptToPhase3;
@@ -28,16 +29,27 @@ function applyComingSoonFlags(phases) {
         }
     }
 }
-function isPhaseComplete(phase) {
-    if (phase.id === 2) {
-        // Phase 2 only requires Gigs / Telephony / Contacts (3, 4, 5).
-        const requiredStepIds = [3, 4, 5];
-        return requiredStepIds.every((reqId) => phase.steps.find((s) => s.id === reqId)?.status === 'completed');
-    }
-    const activeSteps = phase.steps.filter(isActiveStep);
-    if (activeSteps.length === 0)
+/** Required step IDs for a company phase to count as completed. */
+exports.PHASE_REQUIRED_STEP_IDS = {
+    1: [1], // company profile (KYC coming-soon)
+    2: [3, 4], // gig + telephony — do not skip past telephony
+    3: [7, 8, 9, 10],
+    4: [11, 12, 13],
+};
+function isPhaseComplete(phase, options) {
+    // Call-center (and any all-optional account): no step is mandatory.
+    if (options?.allOptional)
         return true;
-    return activeSteps.every((s) => s.status === 'completed');
+    const required = exports.PHASE_REQUIRED_STEP_IDS[phase.id] || [];
+    if (required.length === 0)
+        return false;
+    return required.every((stepId) => {
+        const step = phase.steps.find((s) => s.id === stepId);
+        return step?.status === 'completed';
+    });
+}
+function isAllOptionalAccount(userType) {
+    return String(userType || '').toLowerCase() === 'call-center';
 }
 function getDefaultPhases() {
     return [
