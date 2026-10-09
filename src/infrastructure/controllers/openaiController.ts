@@ -164,7 +164,8 @@ CRITICAL GROUNDING RULES:
 - overview, mission, industry, culture, opportunities and technology MUST reflect the actual company described in the source (website URL + scraped text).
 - Do NOT invent a generic "international services" blurb that could apply to any company.
 - If the source text is sparse, summarize what is actually present; never fabricate products, markets, or claims.
-- Prefer facts quoted or paraphrased from the site content over assumptions.
+- When the source contains real marketing copy, write a full overview (4 to 6 sentences) and a mission (2 to 3 sentences) using only those facts.
+- Prefer facts quoted or paraphrased from the site content over assumptions. The footer, contact block and client-rendered copy are part of the source.
 
 IMPORTANT: All narrative / descriptive fields MUST be bilingual French AND English using objects { "en": "...", "fr": "..." }.
 The JSON response must include ALL of the following fields:
@@ -362,8 +363,10 @@ export class OpenAIController {
       }
     }
 
+    const codeHits = (html.match(/\b(?:function|const|var|return|createElement)\b/g) || []).length;
+    const withoutUrls = html.replace(/https?:\/\/[^\s"'<>]+/gi, ' ');
     const phoneRegex = /(?:\+?\d{1,3}[\s.\-()]?)?(?:\(?\d{2,4}\)?[\s.\-]?){2,5}\d{2,4}/g;
-    const phoneCandidates = html.match(phoneRegex) || [];
+    const phoneCandidates = codeHits < 30 ? (withoutUrls.match(phoneRegex) || []) : [];
     for (const raw of phoneCandidates) {
       const digits = raw.replace(/[^\d+]/g, '');
       if (digits.length < 8 || digits.length > 16) continue;
@@ -374,14 +377,21 @@ export class OpenAIController {
     }
 
     const mailtoMatches = html.matchAll(/href=["']mailto:([^"'?]+)/gi);
-    for (const m of mailtoMatches) emails.add(m[1].trim().toLowerCase());
+    for (const m of mailtoMatches) emails.add(decodeURIComponent(m[1]).trim().toLowerCase());
+    const mailtoLoose = html.matchAll(/mailto:([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/gi);
+    for (const m of mailtoLoose) emails.add(m[1].trim().toLowerCase());
+    for (const m of html.matchAll(/data-cfemail=["']([0-9a-fA-F]+)["']/g)) {
+      const decoded = this.decodeCfEmail(m[1]);
+      if (decoded.includes('@')) emails.add(decoded.toLowerCase());
+    }
 
     const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
     const emailCandidates = html.match(emailRegex) || [];
     for (const raw of emailCandidates) {
       const lower = raw.toLowerCase();
       if (/\.(png|jpe?g|gif|svg|webp|js|css|woff2?|ttf|otf)$/i.test(lower)) continue;
-      if (lower.includes('@sentry') || lower.includes('@example.') || lower.includes('@wixpress')) continue;
+      if (/@(sentry|example|exemple|wixpress|email|domain|test)\./i.test(lower)) continue;
+      if (/(john|jane|jean|nom|name|user)@(example|exemple)\./i.test(lower)) continue;
       emails.add(lower);
       if (emails.size >= 5) break;
     }
@@ -392,8 +402,8 @@ export class OpenAIController {
       if (!matches) return undefined;
       const filtered = matches.filter((u) => {
         const low = u.toLowerCase();
-        if (originHost && low.includes(`/${originHost}`)) return false;
         if (/\/(share|sharer|intent|status|hashtag)\b/.test(low)) return false;
+        if (originHost && /[?&](?:url|u)=/.test(low) && low.includes(originHost)) return false;
         if (/(\.css|\.js|\.png|\.jpg|\.svg)(\?|#|$)/i.test(low)) return false;
         return true;
       });
@@ -460,7 +470,118 @@ export class OpenAIController {
       if (cleaned.length > 5 && cleaned.length < 250) return cleaned;
     }
 
-    return undefined;
+    return this.extractAddressFromPlainText(html);
+  }
+
+  private decodeCfEmail(hex: string): string {
+    if (hex.length < 4 || hex.length % 2 !== 0) return '';
+    const key = parseInt(hex.slice(0, 2), 16);
+    if (Number.isNaN(key)) return '';
+    let out = '';
+    for (let i = 2; i < hex.length; i += 2) {
+      const code = parseInt(hex.slice(i, i + 2), 16);
+      if (Number.isNaN(code)) return '';
+      out += String.fromCharCode(code ^ key);
+    }
+    return out;
+  }
+
+  /** Street + city/zip sitting in footer text or in a client bundle, not only in schema.org. */
+  private extractAddressFromPlainText(text: string): string | undefined {
+    const flat = text.replace(/<[^>]+>/g, ' ').replace(/\\n/g, ' ').replace(/\s+/g, ' ');
+    const street = flat.match(
+      /\b\d{1,6}\s+[A-Za-z0-9.'’\-]{2,30}(?:\s+[A-Za-z0-9.'’\-]{2,24}){0,4}\s(?:Hwy|Highway|Street|St|Road|Rd|Avenue|Ave|Boulevard|Blvd|Lane|Ln|Drive|Dr|Way|Court|Ct|Rue|Chemin|Place|All[ée]e|Bd)\b\.?/i
+    );
+    if (!street || street.index == null) return undefined;
+    const windowText = flat.slice(street.index, street.index + 280);
+    const cityZip = windowText.match(/\b[A-Z][A-Za-z .'-]{1,32},\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?\b/);
+    const frPostal = windowText.match(/\b\d{5}\s+[A-ZÀ-Ÿ][A-Za-zÀ-ÿ .'-]{2,32}\b/);
+    const parts = [street[0].replace(/\s+/g, ' ').trim()];
+    if (cityZip) parts.push(cityZip[0].trim());
+    else if (frPostal) parts.push(frPostal[0].trim());
+    const country = windowText.match(/\b(United States|USA|France|United Kingdom|UK|Canada|Belgium|Suisse|Switzerland|Germany|Deutschland)\b/);
+    if (country) parts.push(country[0]);
+    const joined = parts.join(', ');
+    return joined.length > 8 ? joined : undefined;
+  }
+
+  private skipAssetHost(hostname: string): boolean {
+    return /google|gstatic|mouseflow|zoho|cloudflare|jsdelivr|unpkg|cloudinary|facebook\.net|doubleclick|hotjar|segment|sentry|googleapis/i.test(
+      hostname
+    );
+  }
+
+  private collectScriptUrls(html: string, base: string): string[] {
+    const urls = new Set<string>();
+    const add = (raw: string) => {
+      try {
+        const u = new URL(raw, base);
+        if (u.protocol !== 'http:' && u.protocol !== 'https:') return;
+        if (this.skipAssetHost(u.hostname)) return;
+        urls.add(u.toString());
+      } catch {
+        /* ignore bad urls */
+      }
+    };
+    for (const m of html.matchAll(/<script[^>]+src=["']([^"']+)["']/gi)) add(m[1]);
+    for (const m of html.matchAll(/import\(\s*['"]([^'"]+)['"]\s*\)/gi)) add(m[1]);
+    return [...urls];
+  }
+
+  /** Qiankun/host shells keep the public site on a home or auth entry, not in the shell HTML. */
+  private collectShellAppEntries(js: string): string[] {
+    const urls: string[] = [];
+    const re = /(home|auth)\s*:\s*(?:[A-Za-z_$][\w$]*\()?["'](https?:\/\/[^"']+)["']/g;
+    for (const m of js.matchAll(re)) urls.push(m[2]);
+    return [...new Set(urls)].slice(0, 3);
+  }
+
+  private async fetchTextOptional(target: string, acceptLanguage: string, maxBytes = 1_600_000): Promise<string> {
+    try {
+      const response = await axios.get<string>(target, {
+        timeout: 12000,
+        maxContentLength: maxBytes,
+        maxBodyLength: maxBytes,
+        responseType: 'text',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; HARXProfileBot/1.0; +https://harx.ai)',
+          Accept: 'text/html,application/xhtml+xml,application/javascript,text/javascript,*/*;q=0.8',
+          'Accept-Language': acceptLanguage,
+        },
+        validateStatus: (s) => s >= 200 && s < 400,
+      });
+      const text = typeof response.data === 'string' ? response.data : String(response.data ?? '');
+      return text.slice(0, maxBytes);
+    } catch {
+      return '';
+    }
+  }
+
+  /** Pull human sentences out of a minified bundle so a JS-only site still has copy to profile. */
+  private extractProseFromSource(source: string, maxChars = 8000): string {
+    const seen = new Set<string>();
+    const lines: string[] = [];
+    let used = 0;
+    const regions = [source.slice(Math.floor(source.length * 0.35)), source];
+    const re = /["'`]([^"'`\\][^"'`]{35,320})["'`]/g;
+    for (const region of regions) {
+      if (used >= maxChars) break;
+      for (const m of region.matchAll(re)) {
+        const sentence = m[1].replace(/\\n/g, ' ').replace(/\s+/g, ' ').trim();
+        if ((sentence.match(/ /g) || []).length < 4) continue;
+        if (!/[.!?…]/.test(sentence)) continue;
+        if (sentence.split(' ').length < 6) continue;
+        if (!/[a-zA-ZÀ-ÿ]{3}/.test(sentence)) continue;
+        if (/[{};]|function |const |=>|className|https?:\/\/|<\/?[a-z]|undefined|NaN/i.test(sentence)) continue;
+        if (/admin|stripe|dashboard|console|webpack|sourceMapping|react|invariant|minified|frame rate|hook\b|router|fetcher|loader|hydration|base64|component|chunk|props\b|is not valid|please change|please remove|history only|Location header|FormData|sign-in|sign in|password|verification code|sms\b|scroll to the bottom|registration session/i.test(sentence)) continue;
+        if (seen.has(sentence)) continue;
+        seen.add(sentence);
+        lines.push(sentence);
+        used += sentence.length + 1;
+        if (used >= maxChars) break;
+      }
+    }
+    return lines.join('\n').slice(0, maxChars);
   }
 
   private normalizePhone(raw: string): string {
@@ -600,7 +721,9 @@ export class OpenAIController {
       .trim();
 
     // Keep a much larger window so the AI sees the whole page (incl. footer)
-    const bodyText = cleaned.length > maxChars ? cleaned.slice(0, maxChars) : cleaned;
+    const bodyText = cleaned.length > maxChars
+      ? `${cleaned.slice(0, Math.floor(maxChars * 0.65))}\n…\n${cleaned.slice(-(maxChars - Math.floor(maxChars * 0.65)))}`
+      : cleaned;
     return { title, description, bodyText, ogImage };
   }
 
@@ -655,8 +778,31 @@ export class OpenAIController {
         });
       }
 
+      const acceptLanguage =
+        uiLang === 'fr' ? 'fr-FR,fr;q=0.9,en;q=0.5' : 'en-US,en;q=0.9,fr;q=0.5';
       const { title, description, bodyText, ogImage } = this.extractTextFromHtml(html);
-      const contactData = this.extractContactDataFromHtml(html, normalizedUrl);
+      const bundles: string[] = [];
+      if (bodyText.length < 1500) {
+        const scripts = this.collectScriptUrls(html, normalizedUrl).slice(0, 3);
+        for (const scriptUrl of scripts) {
+          const js = await this.fetchTextOptional(scriptUrl, acceptLanguage);
+          if (!js) continue;
+          bundles.push(js);
+          for (const entry of this.collectShellAppEntries(js)) {
+            const entryDoc = await this.fetchTextOptional(entry, acceptLanguage);
+            if (entryDoc) bundles.push(entryDoc);
+            const nestedBase = entryDoc ? entry : scriptUrl;
+            const nestedHtml = entryDoc || '';
+            for (const nested of this.collectScriptUrls(nestedHtml, nestedBase).slice(0, 2)) {
+              const nestedJs = await this.fetchTextOptional(nested, acceptLanguage);
+              if (nestedJs) bundles.push(nestedJs);
+            }
+          }
+        }
+      }
+      const sourceBlob = [html, ...bundles].join('\n');
+      const renderedCopy = this.extractProseFromSource(bundles.join('\n'));
+      const contactData = this.extractContactDataFromHtml(sourceBlob, normalizedUrl);
       const footerText = this.extractFooterText(html);
       let foundedYear = this.extractFoundedYearFromHtml(html);
 
@@ -674,7 +820,7 @@ export class OpenAIController {
 
       // Systematically crawl the most informative sub-pages so the AI sees the
       // whole site, not just the landing page.
-      const candidatePaths = [
+      const candidatePaths = bodyText.length < 1500 ? [] : [
         '/about', '/about-us', '/a-propos', '/qui-sommes-nous',
         '/contact', '/contact-us', '/contactez-nous',
         '/mentions-legales', '/legal',
@@ -770,6 +916,7 @@ export class OpenAIController {
         contactData.address ? `Detected Address (use it verbatim): ${contactData.address}` : 'NO PHYSICAL ADDRESS FOUND on the page — leave the address field as empty string. Do NOT invent it.',
         socialLines ? `Detected Social Media URLs (use them as-is, do not invent):\n${socialLines}` : 'NO SOCIAL MEDIA URLS FOUND on the page — leave social media fields as empty strings.',
         footerText ? `Footer Content (inspect this carefully for contacts, year, address, social, legal name):\n${footerText}` : '',
+        renderedCopy ? `Visible copy extracted from the site, including the footer and client-rendered text:\n${renderedCopy}` : '',
         combinedSiteText ? `Full Site Content (read everything to extract overview, mission, services, values, team, etc.):\n${combinedSiteText}` : '',
         `STRICT RULE: For contact.email, contact.phone, contact.address, socialMedia.* and founded fields, ONLY use values that appear above as "Detected ..." or that you can quote verbatim from the Footer/Full Site Content. If a value was not detected and is not present in the text, output an empty string "" for that field. NEVER invent placeholders like "+33 1 23 45 67 89", "123 Rue …", "info@example.com", "2010", etc. For overview/mission/culture/opportunities/technology, base your answer ONLY on the Full Site Content for THIS website (${rootUrl}); do not invent facts and do not reuse a generic template.`,
         `UI LANGUAGE: The user interface is in ${uiLang === 'fr' ? 'French' : 'English'}. Write high-quality ${uiLang === 'fr' ? 'French' : 'English'} in the "${uiLang}" fields; still provide the other language.`,
@@ -860,7 +1007,7 @@ ${companyInfo}`;
           },
         ],
         temperature: 0.2,
-        max_tokens: 3200,
+        max_tokens: 4500,
       });
 
         const content = response.choices[0]?.message?.content;
