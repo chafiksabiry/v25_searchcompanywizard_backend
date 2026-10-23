@@ -6,6 +6,9 @@ const openaiController_1 = require("../controllers/openaiController");
 const router = (0, express_1.Router)();
 exports.openaiRoutes = router;
 const openaiController = new openaiController_1.OpenAIController();
+router.get('/status', (req, res) => {
+    openaiController.getAiStatus(req, res);
+});
 // Route pour rechercher le logo d'une entreprise
 router.post('/search-logo', (req, res, next) => {
     openaiController.searchCompanyLogo(req, res, next);

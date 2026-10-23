@@ -4,6 +4,10 @@ import { OpenAIController } from '../controllers/openaiController';
 const router = Router();
 const openaiController = new OpenAIController();
 
+router.get('/status', (req: any, res: any) => {
+  openaiController.getAiStatus(req, res);
+});
+
 // Route pour rechercher le logo d'une entreprise
 router.post('/search-logo', (req: any, res: any, next: any) => {
   openaiController.searchCompanyLogo(req, res, next);

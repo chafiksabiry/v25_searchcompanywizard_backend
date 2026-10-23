@@ -78,6 +78,86 @@ function normalizeUiLang(raw: unknown): UiLang {
   return s.startsWith('en') ? 'en' : 'fr';
 }
 
+type AiProvider = 'openai' | 'anthropic';
+type AiErrorKind = 'auth' | 'quota' | 'rate_limit' | 'network' | 'config' | 'other';
+
+interface ClassifiedAiError {
+  provider: AiProvider;
+  kind: AiErrorKind;
+  status?: number;
+  message: string;
+}
+
+/** Never log raw provider errors — they often embed the API key. */
+function sanitizeAiErrorMessage(raw: unknown): string {
+  const msg = String((raw as { message?: unknown })?.message ?? raw ?? 'unknown error');
+  return msg
+    .replace(/sk-proj-[A-Za-z0-9_\-]{8,}/g, 'sk-proj-***')
+    .replace(/sk-[A-Za-z0-9_\-]{8,}/g, 'sk-***')
+    .replace(/(?:x-api-key|api[_-]?key)['"]?\s*[:=]\s*['"]?[^'"\s]+/gi, 'api_key=***');
+}
+
+function classifyAiError(error: unknown, provider: AiProvider): ClassifiedAiError {
+  const err = error as {
+    status?: number;
+    statusCode?: number;
+    response?: { status?: number };
+    message?: string;
+  };
+  const status = err?.status || err?.statusCode || err?.response?.status;
+  const message = sanitizeAiErrorMessage(error);
+  const lower = message.toLowerCase();
+  let kind: AiErrorKind = 'other';
+  if (
+    status === 401 ||
+    /incorrect api key|invalid.?x-api-key|invalid api key|authentication|unauthorized/.test(lower)
+  ) {
+    kind = 'auth';
+  } else if (status === 429 || /rate.?limit/.test(lower)) {
+    kind = 'rate_limit';
+  } else if (/quota|insufficient|billing/.test(lower)) {
+    kind = 'quota';
+  } else if (/not configured/.test(lower)) {
+    kind = 'config';
+  } else if (/econnreset|etimedout|enotfound|network|fetch failed/.test(lower)) {
+    kind = 'network';
+  }
+  return { provider, kind, ...(status ? { status } : {}), message };
+}
+
+function fallbackReason(errors: ClassifiedAiError[]): 'ai_not_configured' | 'ai_auth_failed' | 'ai_unavailable' {
+  if (!apiKey && !anthropicKey) return 'ai_not_configured';
+  if (errors.some((e) => e.kind === 'auth')) return 'ai_auth_failed';
+  if (errors.some((e) => e.kind === 'config')) return 'ai_not_configured';
+  return 'ai_unavailable';
+}
+
+function fallbackWarning(uiLang: UiLang, reason: ReturnType<typeof fallbackReason>): string {
+  if (uiLang === 'en') {
+    if (reason === 'ai_auth_failed') {
+      return 'AI keys rejected (401). Profile prefilled from the website — no AI-written copy.';
+    }
+    if (reason === 'ai_not_configured') {
+      return 'AI keys are missing. Profile prefilled from the website.';
+    }
+    return 'AI providers unavailable. Profile prefilled from the website.';
+  }
+  if (reason === 'ai_auth_failed') {
+    return 'Clés IA refusées (401). Profil prérempli depuis le site — pas de texte généré par IA.';
+  }
+  if (reason === 'ai_not_configured') {
+    return 'Clés IA absentes. Profil prérempli depuis le site.';
+  }
+  return 'IA indisponible. Profil prérempli depuis le site.';
+}
+
+function keyHint(key?: string): string | null {
+  if (!key) return null;
+  const trimmed = key.trim();
+  if (trimmed.length < 8) return 'too_short';
+  return `…${trimmed.slice(-4)}`;
+}
+
 /** Normalize AI bilingual (or legacy string) text → plain (UI lang) + {en,fr}. */
 function asI18nText(
   raw: unknown,
@@ -219,6 +299,21 @@ interface UniquenessCategory {
 }
 
 export class OpenAIController {
+  /** Railway / ops: are AI keys present? Does not call the providers. */
+  async getAiStatus(_req: Request, res: Response) {
+    return res.status(200).json({
+      success: true,
+      openai: {
+        configured: Boolean(apiKey),
+        hint: keyHint(apiKey),
+      },
+      anthropic: {
+        configured: Boolean(anthropicKey),
+        hint: keyHint(anthropicKey),
+      },
+    });
+  }
+
   async searchCompanies(req: Request, res: Response, next: NextFunction) {
     try {
       const { query, language } = req.body;
@@ -257,11 +352,26 @@ export class OpenAIController {
 
       const { companyName, companyWebsite } = req.body;
 
+      const clearbitFallback = (): string | null => {
+        if (!companyWebsite) return null;
+        try {
+          const host = new URL(
+            /^https?:\/\//i.test(companyWebsite) ? companyWebsite : `https://${companyWebsite}`
+          ).hostname;
+          return host ? `https://logo.clearbit.com/${host}` : null;
+        } catch {
+          return null;
+        }
+      };
+
       if (!apiKey) {
-        console.error('❌ [OpenAI] API key not configured');
-        return res.status(500).json({
-          success: false,
-          message: 'OpenAI API key is not configured',
+        const logoUrl = clearbitFallback();
+        return res.status(200).json({
+          success: true,
+          data: { logoUrl },
+          fallback: true,
+          reason: 'ai_not_configured',
+          warning: 'OPENAI_API_KEY absente — logo Clearbit utilisé si possible.',
         });
       }
 
@@ -313,8 +423,26 @@ export class OpenAIController {
         data: { logoUrl },
       });
     } catch (error) {
-      console.error("💥 [OpenAI] Logo search error:", error);
-      next(error);
+      const classified = classifyAiError(error, 'openai');
+      console.warn('⚠️ [OpenAI] Logo search failed:', classified);
+      let logoUrl: string | null = null;
+      const website = req.body?.companyWebsite;
+      if (website) {
+        try {
+          const host = new URL(/^https?:\/\//i.test(website) ? website : `https://${website}`).hostname;
+          logoUrl = host ? `https://logo.clearbit.com/${host}` : null;
+        } catch { /* ignore */ }
+      }
+      return res.status(200).json({
+        success: true,
+        data: { logoUrl },
+        fallback: true,
+        reason: classified.kind === 'auth' ? 'ai_auth_failed' : 'ai_unavailable',
+        warning: classified.kind === 'auth'
+          ? 'Clé OpenAI refusée (401). Logo Clearbit utilisé si possible.'
+          : 'IA logo indisponible. Logo Clearbit utilisé si possible.',
+        aiErrors: [classified],
+      });
     }
   }
 
@@ -337,6 +465,168 @@ export class OpenAIController {
     // 123-4567 / 555-1234 style fakes anywhere
     if (/12345|23456|34567|45678|56789/.test(digits) && digits.length <= 12) return true;
     return false;
+  }
+
+  /** SVG path / map coords mistaken as phones: "1.4773 16.3029" */
+  private isCoordinateLikePhone(raw: string): boolean {
+    if (/\d+\.\d+\s+\d+\.\d+/.test(raw)) return true;
+    const digits = raw.replace(/\D/g, '');
+    if (digits.length >= 8 && raw.includes('.') && raw.includes(' ')) return true;
+    return false;
+  }
+
+  private pickUsablePhone(phones?: string[], aiPhone?: string): string {
+    if (phones?.length) {
+      for (const p of phones) {
+        if (!p) continue;
+        if (this.isCoordinateLikePhone(p)) continue;
+        if (this.isFakePhone(p)) continue;
+        return p;
+      }
+    }
+    if (aiPhone && aiPhone !== 'Téléphone non trouvé' && !this.isCoordinateLikePhone(aiPhone) && !this.isFakePhone(aiPhone)) {
+      return aiPhone;
+    }
+    return '';
+  }
+
+  private decodeHtmlEntities(text: string): string {
+    return text
+      .replace(/&amp;/g, '&')
+      .replace(/&quot;/g, '"')
+      .replace(/&#039;|&apos;/g, "'")
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(parseInt(n, 10)))
+      .replace(/&nbsp;/g, ' ')
+      .trim();
+  }
+
+  private parseLabeledField(companyInfo: string, labels: string[]): string {
+    for (const label of labels) {
+      const re = new RegExp(`(?:^|\\n)\\s*${label}\\s*:\\s*(.+)`, 'i');
+      const m = companyInfo.match(re);
+      if (m?.[1]) {
+        const value = this.decodeHtmlEntities(m[1].trim());
+        if (value && value !== 'undefined' && value !== 'null') return value;
+      }
+    }
+    return '';
+  }
+
+  private inferCompanyName(companyInfo: string, websiteUrl?: string): string {
+    const fromLabel = this.parseLabeledField(companyInfo, ['Company Name', 'Nom', 'Page Title', 'Title']);
+    if (fromLabel) {
+      const beforeSep = fromLabel.split(/\s*[|–—]\s*/)[0].trim();
+      if (beforeSep.length >= 2 && beforeSep.length <= 80) return beforeSep;
+      return fromLabel.slice(0, 80);
+    }
+    if (websiteUrl) {
+      try {
+        const host = new URL(websiteUrl).hostname.replace(/^www\./, '');
+        const brand = host.split('.')[0];
+        if (brand) return brand.charAt(0).toUpperCase() + brand.slice(1);
+      } catch {
+        /* ignore */
+      }
+    }
+    return '';
+  }
+
+  private buildFallbackProfile(opts: {
+    companyInfo: string;
+    userId?: string;
+    logoUrl?: string;
+    uiLang: UiLang;
+    scraped?: {
+      phones: string[];
+      emails: string[];
+      address?: string;
+      socialMedia: { linkedin?: string; twitter?: string; facebook?: string; instagram?: string; youtube?: string };
+    };
+    websiteUrl?: string;
+    founded?: string;
+  }): CompanyProfile {
+    const name = this.inferCompanyName(opts.companyInfo, opts.websiteUrl);
+    const metaDesc = this.parseLabeledField(opts.companyInfo, ['Meta Description', 'Description']);
+    const website =
+      opts.websiteUrl || this.parseLabeledField(opts.companyInfo, ['Website', 'Site']);
+
+    const overviewFr =
+      metaDesc ||
+      (name
+        ? `Profil prérempli à partir du site ${website || name}. Vérifiez et complétez les informations avant publication.`
+        : 'Profil prérempli à partir du site. Vérifiez et complétez les informations avant publication.');
+    const overviewEn =
+      metaDesc ||
+      (name
+        ? `Profile pre-filled from ${website || name}. Review and complete the information before publishing.`
+        : 'Profile pre-filled from the website. Review and complete the information before publishing.');
+
+    const overview = asI18nText({ fr: overviewFr, en: overviewEn }, opts.uiLang);
+    const emptyText = asI18nText({ fr: '', en: '' }, opts.uiLang);
+    const emptyList = asI18nList([], opts.uiLang);
+    const intro = asI18nText(
+      {
+        fr: 'Prérempli à partir du site (IA indisponible)',
+        en: 'Pre-filled from website (AI unavailable)',
+      },
+      opts.uiLang
+    );
+
+    const emails = opts.scraped?.emails || [];
+    const generic = emails.find((e) =>
+      /^(contact|info|hello|hi|sales|support|office|press|jobs|service)/i.test(e)
+    );
+
+    return {
+      userId: opts.userId || '681a91212c1ca099fe2b17df',
+      name,
+      founded: opts.founded ? String(opts.founded) : '',
+      headquarters: opts.scraped?.address || '',
+      industry: emptyText.plain,
+      industry_i18n: emptyText.i18n,
+      overview: overview.plain,
+      overview_i18n: overview.i18n,
+      mission: emptyText.plain,
+      mission_i18n: emptyText.i18n,
+      companyIntro: intro.plain,
+      companyIntro_i18n: intro.i18n,
+      logo: opts.logoUrl || '',
+      culture: {
+        values: emptyList.plain,
+        values_i18n: emptyList.i18n,
+        benefits: emptyList.plain,
+        benefits_i18n: emptyList.i18n,
+        workEnvironment: emptyText.plain,
+        workEnvironment_i18n: emptyText.i18n,
+      },
+      opportunities: {
+        roles: emptyList.plain,
+        roles_i18n: emptyList.i18n,
+        growthPotential: emptyText.plain,
+        growthPotential_i18n: emptyText.i18n,
+        training: emptyText.plain,
+        training_i18n: emptyText.i18n,
+      },
+      technology: {
+        stack: [],
+        innovation: emptyText.plain,
+        innovation_i18n: emptyText.i18n,
+      },
+      contact: {
+        email: generic || emails[0] || '',
+        phone: this.pickUsablePhone(opts.scraped?.phones),
+        address: opts.scraped?.address || '',
+        website: website || '',
+      },
+      socialMedia: {
+        linkedin: opts.scraped?.socialMedia?.linkedin || '',
+        twitter: opts.scraped?.socialMedia?.twitter || '',
+        facebook: opts.scraped?.socialMedia?.facebook || '',
+        instagram: opts.scraped?.socialMedia?.instagram || '',
+      },
+    };
   }
 
   private extractContactDataFromHtml(html: string, baseUrl?: string): {
@@ -937,8 +1227,16 @@ export class OpenAIController {
 
       return this.generateCompanyProfile(req, res, next);
     } catch (error: any) {
-      console.error('💥 [Scrape] Error:', error);
-      res.status(500).json({ success: false, message: 'Failed to scrape and generate profile', error: error.message });
+      const message = sanitizeAiErrorMessage(error);
+      console.error('💥 [Scrape] Error:', message);
+      if (!res.headersSent) {
+        res.status(502).json({
+          success: false,
+          message: 'Failed to scrape and generate profile',
+          error: message,
+          reason: 'scrape_failed',
+        });
+      }
     }
   }
 
@@ -966,14 +1264,6 @@ export class OpenAIController {
         console.warn('⚠️ [AI] persist=true ignored — use POST /api/companies to save the company');
       }
 
-      if (!apiKey) {
-        console.error('❌ [OpenAI] API key not configured');
-        return res.status(500).json({
-          success: false,
-          message: 'OpenAI API key is not configured',
-        });
-      }
-
       if (!companyInfo) {
         console.warn('⚠️ [OpenAI] Company information is required');
         return res.status(400).json({
@@ -982,6 +1272,41 @@ export class OpenAIController {
         });
       }
 
+      const scrapedContact = _scrapedContact as
+        | {
+            phones: string[];
+            emails: string[];
+            address?: string;
+            socialMedia: { linkedin?: string; twitter?: string; facebook?: string; instagram?: string; youtube?: string };
+          }
+        | undefined;
+
+      const aiErrors: ClassifiedAiError[] = [];
+
+      const respondWithScrapeFallback = async () => {
+        const reason = fallbackReason(aiErrors);
+        console.warn('⚠️ [AI] Scrape-only fallback:', reason, aiErrors);
+        const fallback = this.buildFallbackProfile({
+          companyInfo,
+          userId,
+          logoUrl,
+          uiLang,
+          scraped: scrapedContact,
+          websiteUrl: _websiteUrl,
+          founded: _scrapedFounded ? String(_scrapedFounded) : undefined,
+        });
+        const bilingualProfile = await ensureDistinctBilingualProfile(fallback);
+        return res.status(200).json({
+          success: true,
+          data: bilingualProfile,
+          fallback: true,
+          provider: 'scrape',
+          reason,
+          warning: fallbackWarning(uiLang, reason),
+          aiErrors,
+        });
+      };
+
       let profileData: any;
       let usedFallback = false;
       const userPrompt = `Generate a bilingual (FR + EN) JSON company profile grounded ONLY in this source material.
@@ -989,35 +1314,8 @@ Primary UI language: ${uiLang}. Put the best ${uiLang === 'fr' ? 'French' : 'Eng
 Source material:
 ${companyInfo}`;
 
-      try {
-        const openai = new OpenAI({ apiKey: apiKey! });
-        const response = await openai.chat.completions.create({
-        // gpt-4o-mini has a 128k context window — required to ingest the full
-        // site dump (home + sub-pages, up to ~40k chars) without truncation.
-        model: process.env.OPENAI_MODEL || "gpt-4o-mini",
-        response_format: { type: "json_object" },
-        messages: [
-          {
-            role: "system",
-            content: COMPANY_PROFILE_SYSTEM_PROMPT,
-          },
-          {
-            role: "user",
-            content: userPrompt,
-          },
-        ],
-        temperature: 0.2,
-        max_tokens: 4500,
-      });
-
-        const content = response.choices[0]?.message?.content;
-        if (!content) throw new Error("OpenAI returned empty content");
-        profileData = JSON.parse(content);
-        console.log('✅ [OpenAI] Profile generated successfully');
-      } catch (error: any) {
-        console.warn('⚠️ [OpenAI] Failed, falling back to Anthropic...', error.message);
-        if (!anthropicKey) throw error;
-        
+      const tryAnthropic = async () => {
+        if (!anthropicKey) throw new Error('ANTHROPIC_API_KEY is not configured');
         usedFallback = true;
         const anthropic = new Anthropic({ apiKey: anthropicKey });
         const anthropicResponse = await anthropic.messages.create({
@@ -1031,23 +1329,79 @@ ${companyInfo}`;
         const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
         profileData = JSON.parse(jsonMatch ? jsonMatch[0] : rawContent);
         console.log('✅ [Anthropic] Profile generated successfully (Fallback)');
+      };
+
+      try {
+        if (apiKey) {
+          try {
+            const openai = new OpenAI({ apiKey: apiKey! });
+            const response = await openai.chat.completions.create({
+              // gpt-4o-mini has a 128k context window — required to ingest the full
+              // site dump (home + sub-pages, up to ~40k chars) without truncation.
+              model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+              response_format: { type: "json_object" },
+              messages: [
+                {
+                  role: "system",
+                  content: COMPANY_PROFILE_SYSTEM_PROMPT,
+                },
+                {
+                  role: "user",
+                  content: userPrompt,
+                },
+              ],
+              temperature: 0.2,
+              max_tokens: 4500,
+            });
+
+            const content = response.choices[0]?.message?.content;
+            if (!content) throw new Error("OpenAI returned empty content");
+            profileData = JSON.parse(content);
+            console.log('✅ [OpenAI] Profile generated successfully');
+          } catch (error: any) {
+            const classified = classifyAiError(error, 'openai');
+            aiErrors.push(classified);
+            console.warn('⚠️ [OpenAI] Failed, falling back to Anthropic...', classified);
+            try {
+              await tryAnthropic();
+            } catch (anthError: any) {
+              const anthClassified = classifyAiError(anthError, 'anthropic');
+              aiErrors.push(anthClassified);
+              console.warn('⚠️ [Anthropic] Failed, falling back to scrape...', anthClassified);
+              return respondWithScrapeFallback();
+            }
+          }
+        } else if (anthropicKey) {
+          try {
+            await tryAnthropic();
+          } catch (anthError: any) {
+            const anthClassified = classifyAiError(anthError, 'anthropic');
+            aiErrors.push(anthClassified);
+            console.warn('⚠️ [Anthropic] Failed, falling back to scrape...', anthClassified);
+            return respondWithScrapeFallback();
+          }
+        } else {
+          console.warn('⚠️ [AI] No OpenAI or Anthropic key configured — scrape fallback');
+          return respondWithScrapeFallback();
+        }
+      } catch (error: any) {
+        aiErrors.push(classifyAiError(error, apiKey ? 'openai' : 'anthropic'));
+        console.warn('⚠️ [AI] Providers failed, falling back to scrape...', aiErrors);
+        return respondWithScrapeFallback();
+      }
+
+      if (!profileData) {
+        return respondWithScrapeFallback();
       }
 
       console.log('🔍 [AI] Finalizing profile with data from provider...');
 
-      const scraped = _scrapedContact as
-        | {
-            phones: string[];
-            emails: string[];
-            address?: string;
-            socialMedia: { linkedin?: string; twitter?: string; facebook?: string; instagram?: string; youtube?: string };
-          }
-        | undefined;
+      const scraped = scrapedContact;
 
       const pickEmail = (aiEmail?: string): string => {
         if (scraped?.emails?.length) {
           const generic = scraped.emails.find((e) =>
-            /^(contact|info|hello|hi|sales|support|office|press|jobs)@/i.test(e)
+            /^(contact|info|hello|hi|sales|support|office|press|jobs|service)@/i.test(e)
           );
           return generic || scraped.emails[0];
         }
@@ -1055,12 +1409,7 @@ ${companyInfo}`;
       };
 
       const pickPhone = (aiPhone?: string): string => {
-        if (scraped?.phones?.length) return scraped.phones[0];
-        // Only keep AI phone if it doesn't look fabricated.
-        if (aiPhone && aiPhone !== "Téléphone non trouvé" && !this.isFakePhone(aiPhone)) {
-          return aiPhone;
-        }
-        return "";
+        return this.pickUsablePhone(scraped?.phones, aiPhone);
       };
 
       const pickAddress = (aiAddress?: string): string => {
@@ -1175,8 +1524,61 @@ ${companyInfo}`;
         provider: usedFallback ? 'anthropic' : 'openai'
       });
     } catch (error: any) {
-      console.error("💥 [AI] Error:", error);
-      res.status(500).json({ success: false, message: 'AI generation failed', error: error.message });
+      const classified = classifyAiError(error, 'openai');
+      console.error("💥 [AI] Error:", classified);
+      if (res.headersSent) return;
+      try {
+        const {
+          companyInfo: info,
+          userId: uid,
+          logoUrl: logo,
+          language: rawLang,
+          _scrapedContact: contact,
+          _websiteUrl: site,
+          _scrapedFounded: year,
+        } = req.body || {};
+        if (!info) {
+          return res.status(500).json({
+            success: false,
+            message: 'AI generation failed',
+            error: classified.message,
+            reason: classified.kind === 'auth' ? 'ai_auth_failed' : 'ai_unavailable',
+            aiErrors: [classified],
+          });
+        }
+        const ui = normalizeUiLang(rawLang);
+        const fallback = this.buildFallbackProfile({
+          companyInfo: info,
+          userId: uid,
+          logoUrl: logo,
+          uiLang: ui,
+          scraped: contact,
+          websiteUrl: site,
+          founded: year ? String(year) : undefined,
+        });
+        const bilingualProfile = await ensureDistinctBilingualProfile(fallback);
+        const reason = fallbackReason([classified]);
+        return res.status(200).json({
+          success: true,
+          data: bilingualProfile,
+          fallback: true,
+          provider: 'scrape',
+          reason,
+          warning: fallbackWarning(ui, reason),
+          aiErrors: [classified],
+        });
+      } catch (fallbackError: any) {
+        console.error("💥 [AI] Scrape fallback also failed:", sanitizeAiErrorMessage(fallbackError));
+        if (!res.headersSent) {
+          res.status(500).json({
+            success: false,
+            message: 'AI generation failed',
+            error: classified.message,
+            reason: classified.kind === 'auth' ? 'ai_auth_failed' : 'ai_unavailable',
+            aiErrors: [classified],
+          });
+        }
+      }
     }
   }
 
@@ -1202,7 +1604,7 @@ ${companyInfo}`;
       const content = response.choices[0]?.message?.content;
       return content || "Error generating text";
     } catch (error) {
-      console.error("OpenAI API Error:", error);
+      console.warn("⚠️ [OpenAI] Intro generation failed:", classifyAiError(error, 'openai'));
       return "Error generating text";
     }
   }
@@ -1217,10 +1619,13 @@ ${companyInfo}`;
       const { profile } = req.body;
 
       if (!apiKey) {
-        console.error('❌ [OpenAI] API key not configured');
-        return res.status(500).json({
-          success: false,
-          message: 'OpenAI API key is not configured',
+        console.warn('⚠️ [OpenAI] Uniqueness skipped — OPENAI_API_KEY missing');
+        return res.status(200).json({
+          success: true,
+          data: [],
+          fallback: true,
+          reason: 'ai_not_configured',
+          warning: 'OPENAI_API_KEY absente — catégories d’unicité non générées.',
         });
       }
 
@@ -1352,8 +1757,18 @@ Make the categories relevant to the company's industry and strengths. Focus on w
         data: formattedCategories,
       });
     } catch (error) {
-      console.error("💥 [OpenAI] Uniqueness categories error:", error);
-      next(error);
+      const classified = classifyAiError(error, 'openai');
+      console.warn('⚠️ [OpenAI] Uniqueness categories failed:', classified);
+      return res.status(200).json({
+        success: true,
+        data: [],
+        fallback: true,
+        reason: classified.kind === 'auth' ? 'ai_auth_failed' : 'ai_unavailable',
+        warning: classified.kind === 'auth'
+          ? 'Clé OpenAI refusée (401). Catégories d’unicité non générées.'
+          : 'IA indisponible. Catégories d’unicité non générées.',
+        aiErrors: [classified],
+      });
     }
   }
 }
