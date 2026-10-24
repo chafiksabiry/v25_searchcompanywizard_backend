@@ -10,6 +10,8 @@ router.get('/', companyController.getAllCompanies);
 // Static segments before /:id
 router.get('/user/:userId', companyController.getCompanyByUserId);
 router.get('/:id/details', companyController.getCompanyDetails);
+router.get('/:id/dashboard-config', companyController.getDashboardConfig);
+router.put('/:id/dashboard-config', companyController.updateDashboardConfig);
 router.get('/:id', companyController.getCompanyById);
 router.put('/:id', validateCompany, companyController.updateCompany);
 router.put('/:id/subscription', companyController.updateSubscription);
