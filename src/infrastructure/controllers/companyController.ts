@@ -7,7 +7,8 @@ const companyService = new CompanyService();
 export class CompanyController {
   async createCompany(req: Request, res: Response, next: NextFunction) {
     try {
-      const company = await companyService.createCompany(req.body);
+      const { kybVerified: _ignored, ...body } = req.body ?? {};
+      const company = await companyService.createCompany(body);
       // Upsert: create or update existing (same user / same name draft).
       const status = 200;
       res.status(status).json({
@@ -54,7 +55,9 @@ export class CompanyController {
 
   async updateCompany(req: Request, res: Response, next: NextFunction) {
     try {
-      const updatedCompany = await companyService.updateCompany(req.params.id, req.body);
+      // The verified badge is only ever set by the verification flow, never by profile edits.
+      const { kybVerified: _ignored, ...body } = req.body ?? {};
+      const updatedCompany = await companyService.updateCompany(req.params.id, body);
       if (!updatedCompany) {
         return res.status(404).json({
           success: false,
