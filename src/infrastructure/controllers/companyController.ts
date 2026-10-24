@@ -4,10 +4,23 @@ import { CompanyModel } from '../database/models/CompanyModel';
 
 const companyService = new CompanyService();
 
+/** Widgets a company can place on its dashboard (keep in sync with the front catalogue). */
+export const DASHBOARD_WIDGET_IDS = [
+  'reachability',
+  'argumentation',
+  'validation',
+  'conversion',
+  'identity',
+  'contact',
+  'onboarding',
+  'gigs',
+] as const;
+
+
 export class CompanyController {
   async createCompany(req: Request, res: Response, next: NextFunction) {
     try {
-      const { kybVerified: _ignored, ...body } = req.body ?? {};
+      const { kybVerified: _ignored, dashboardConfig: _cfg, ...body } = req.body ?? {};
       const company = await companyService.createCompany(body);
       // Upsert: create or update existing (same user / same name draft).
       const status = 200;
@@ -56,7 +69,7 @@ export class CompanyController {
   async updateCompany(req: Request, res: Response, next: NextFunction) {
     try {
       // The verified badge is only ever set by the verification flow, never by profile edits.
-      const { kybVerified: _ignored, ...body } = req.body ?? {};
+      const { kybVerified: _ignored, dashboardConfig: _cfg, ...body } = req.body ?? {};
       const updatedCompany = await companyService.updateCompany(req.params.id, body);
       if (!updatedCompany) {
         return res.status(404).json({
@@ -150,6 +163,48 @@ export class CompanyController {
         message: 'Company details retrieved successfully',
         data: company,
       });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /** Per-company dashboard layout: ordered list of widgets with their visibility. */
+  async getDashboardConfig(req: Request, res: Response, next: NextFunction) {
+    try {
+      const company = await CompanyModel.findById(req.params.id).select('dashboardConfig').lean<any>();
+      if (!company) return res.status(404).json({ success: false, message: 'Company not found' });
+      const cfg = company.dashboardConfig;
+      res.status(200).json({
+        success: true,
+        data: { widgets: cfg?.widgets ?? [], updatedAt: cfg?.updatedAt ?? null, configured: Boolean(cfg?.updatedAt) },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async updateDashboardConfig(req: Request, res: Response, next: NextFunction) {
+    try {
+      const raw = req.body?.widgets;
+      if (!Array.isArray(raw)) {
+        return res.status(400).json({ success: false, message: 'widgets must be an array' });
+      }
+      const seen = new Set<string>();
+      const widgets: { id: string; enabled: boolean }[] = [];
+      for (const w of raw) {
+        const id = String(w?.id ?? '');
+        if (!(DASHBOARD_WIDGET_IDS as readonly string[]).includes(id) || seen.has(id)) continue;
+        seen.add(id);
+        widgets.push({ id, enabled: w?.enabled !== false });
+      }
+      const updatedAt = new Date();
+      const company = await CompanyModel.findByIdAndUpdate(
+        req.params.id,
+        { $set: { dashboardConfig: { widgets, updatedAt } } },
+        { new: true }
+      ).select('_id');
+      if (!company) return res.status(404).json({ success: false, message: 'Company not found' });
+      res.status(200).json({ success: true, data: { widgets, updatedAt, configured: true } });
     } catch (error) {
       next(error);
     }

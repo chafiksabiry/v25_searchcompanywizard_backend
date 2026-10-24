@@ -68,7 +68,11 @@ const companySchema = new mongoose.Schema({
     instagram: String
   },
   differentiators: [String],
-  kybVerified: { type: Boolean, default: false }
+  kybVerified: { type: Boolean, default: false },
+  dashboardConfig: {
+    widgets: [{ _id: false, id: String, enabled: Boolean }],
+    updatedAt: Date,
+  }
 }, {
   timestamps: true
 });
