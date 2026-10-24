@@ -6,14 +6,12 @@ const companyService = new CompanyService();
 
 /** Widgets a company can place on its dashboard (keep in sync with the front catalogue). */
 export const DASHBOARD_WIDGET_IDS = [
-  'reachability',
-  'argumentation',
-  'validation',
-  'conversion',
-  'identity',
-  'contact',
-  'onboarding',
-  'gigs',
+  'kpis',
+  'voiceAssistant',
+  'coverage',
+  'agents',
+  'resources',
+  'performance7d',
 ] as const;
 
 
