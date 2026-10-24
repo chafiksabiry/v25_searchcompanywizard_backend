@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import axios from 'axios';
+import { resolveCompanyLogo } from '../utils/logoResolver';
 import { googleSearchService } from '../services/googleSearchService';
 
 const apiKey = process.env.OPENAI_API_KEY;
@@ -166,6 +167,13 @@ CRITICAL GROUNDING RULES:
 - If the source text is sparse, summarize what is actually present; never fabricate products, markets, or claims.
 - When the source contains real marketing copy, write a full overview (4 to 6 sentences) and a mission (2 to 3 sentences) using only those facts.
 - Prefer facts quoted or paraphrased from the site content over assumptions. The footer, contact block and client-rendered copy are part of the source.
+
+WRITING QUALITY (applies to overview, mission and companyIntro):
+- overview: 4 to 6 sentences, no bullet points. In this order: who the company is (what it does, since when, where based) -> what it offers (concrete services/products named on the site) -> who it serves (target clients, sectors, countries) -> what sets it apart (proof points: figures, certifications, years of experience, notable clients, only if present in the source).
+- mission: 2 sentences in the company's own voice, grounded in the site's stated purpose or promise. If the site states no mission, derive it from its value proposition without inventing claims.
+- companyIntro: 2 sentences aimed at a freelance rep or partner considering working with the company: what they would sell or do, and what the company offers them.
+- Be specific and concrete. Banned filler: "leader", "leading provider", "innovative solutions", "cutting-edge", "world-class", "passionate", "dedicated to excellence", "tailored solutions" unless quoted on the site. Never start with the company name followed by "is a company that".
+- Write fluent, natural French AND English (no word-for-word translation), third person, present tense, no marketing superlatives, no repetition between overview and mission.
 
 IMPORTANT: All narrative / descriptive fields MUST be bilingual French AND English using objects { "en": "...", "fr": "..." }.
 The JSON response must include ALL of the following fields:
@@ -864,7 +872,7 @@ export class OpenAIController {
           // ignore unreachable sub pages
         }
       }
-      const inferredLogo = logoUrl || ogImage || `https://logo.clearbit.com/${parsed.hostname}`;
+      const inferredLogo = logoUrl || (await resolveCompanyLogo(html, normalizedUrl, parsed.hostname));
 
       console.log('🔎 [Scrape] Extracted data:', {
         phones: contactData.phones,
@@ -1006,7 +1014,7 @@ ${companyInfo}`;
             content: userPrompt,
           },
         ],
-        temperature: 0.2,
+        temperature: 0.4,
         max_tokens: 4500,
       });
 
