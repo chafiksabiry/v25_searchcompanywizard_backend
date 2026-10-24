@@ -158,6 +158,25 @@ function keyHint(key?: string): string | null {
   return `…${trimmed.slice(-4)}`;
 }
 
+function brandHost(hostname: string): string {
+  return String(hostname || '').replace(/^www\./i, '').toLowerCase();
+}
+
+function clearbitLogoUrl(hostname: string): string {
+  return `https://logo.clearbit.com/${brandHost(hostname)}`;
+}
+
+/** Campaign / social share images — not a company mark, often CORS-blocked. */
+function isUnreliableLogoUrl(url: string): boolean {
+  const u = String(url || '').toLowerCase();
+  return /cdninstagram|instagram\.com|fbcdn\.|facebook\.com\/.+\/(p|photos?|picture)|pbs\.twimg|tiktokcdn|s24\.fr|bdi\.dlpdomain/i.test(u);
+}
+
+function looksLikeLogoAsset(url: string): boolean {
+  if (!url || isUnreliableLogoUrl(url)) return false;
+  return /\/logo\b|logo[-_.]|favicon|apple-touch-icon|icon[-_.]|\.(svg|ico)(\?|$)/i.test(url);
+}
+
 /** Normalize AI bilingual (or legacy string) text → plain (UI lang) + {en,fr}. */
 function asI18nText(
   raw: unknown,
@@ -358,7 +377,7 @@ export class OpenAIController {
           const host = new URL(
             /^https?:\/\//i.test(companyWebsite) ? companyWebsite : `https://${companyWebsite}`
           ).hostname;
-          return host ? `https://logo.clearbit.com/${host}` : null;
+          return host ? clearbitLogoUrl(host) : null;
         } catch {
           return null;
         }
@@ -430,7 +449,7 @@ export class OpenAIController {
       if (website) {
         try {
           const host = new URL(/^https?:\/\//i.test(website) ? website : `https://${website}`).hostname;
-          logoUrl = host ? `https://logo.clearbit.com/${host}` : null;
+          logoUrl = host ? clearbitLogoUrl(host) : null;
         } catch { /* ignore */ }
       }
       return res.status(200).json({
@@ -982,6 +1001,57 @@ export class OpenAIController {
     return undefined;
   }
 
+  private resolvePageUrl(raw: string, pageUrl: string): string | undefined {
+    try {
+      return new URL(raw.trim(), pageUrl).toString();
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Prefer favicons / logo assets over og:image campaign photos. */
+  private extractLogoFromHtml(html: string, pageUrl: string): string | undefined {
+    const scored: { url: string; score: number }[] = [];
+    const push = (raw: string | undefined, score: number) => {
+      if (!raw) return;
+      const abs = this.resolvePageUrl(raw, pageUrl);
+      if (!abs || isUnreliableLogoUrl(abs)) return;
+      scored.push({ url: abs, score: looksLikeLogoAsset(abs) ? score + 15 : score });
+    };
+
+    const linkTags = html.match(/<link\b[^>]*>/gi) || [];
+    for (const tag of linkTags) {
+      const rel = tag.match(/\brel=["']([^"']+)["']/i)?.[1] || '';
+      const href = tag.match(/\bhref=["']([^"']+)["']/i)?.[1];
+      if (/apple-touch-icon/i.test(rel)) push(href, 60);
+      else if (/\bicon\b/i.test(rel)) push(href, 50);
+    }
+
+    const imgTags = html.match(/<img\b[^>]*>/gi) || [];
+    for (const tag of imgTags.slice(0, 40)) {
+      const src = tag.match(/\bsrc=["']([^"']+)["']/i)?.[1];
+      const alt = tag.match(/\balt=["']([^"']+)["']/i)?.[1] || '';
+      if (src && /logo/i.test(`${src} ${alt}`)) push(src, 35);
+    }
+
+    scored.sort((a, b) => b.score - a.score);
+    return scored[0]?.url;
+  }
+
+  private pickCompanyLogo(opts: {
+    provided?: string;
+    extracted?: string;
+    ogImage?: string;
+    hostname: string;
+  }): string {
+    if (opts.provided && !isUnreliableLogoUrl(opts.provided) && looksLikeLogoAsset(opts.provided)) {
+      return opts.provided;
+    }
+    if (opts.extracted) return opts.extracted;
+    if (opts.ogImage && looksLikeLogoAsset(opts.ogImage)) return opts.ogImage;
+    return clearbitLogoUrl(opts.hostname);
+  }
+
   private extractTextFromHtml(html: string, maxChars = 20000): { title: string; description: string; bodyText: string; ogImage?: string } {
     const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
     const title = titleMatch ? titleMatch[1].trim() : '';
@@ -1154,7 +1224,13 @@ export class OpenAIController {
           // ignore unreachable sub pages
         }
       }
-      const inferredLogo = logoUrl || ogImage || `https://logo.clearbit.com/${parsed.hostname}`;
+      const extractedLogo = this.extractLogoFromHtml(html, normalizedUrl);
+      const inferredLogo = this.pickCompanyLogo({
+        provided: typeof logoUrl === 'string' ? logoUrl : undefined,
+        extracted: extractedLogo,
+        ogImage,
+        hostname: parsed.hostname,
+      });
 
       console.log('🔎 [Scrape] Extracted data:', {
         phones: contactData.phones,
@@ -1162,6 +1238,7 @@ export class OpenAIController {
         address: contactData.address,
         social: contactData.socialMedia,
         founded: foundedYear,
+        logo: inferredLogo,
         subPages: subPageTexts.map((s) => s.url),
         footerSnippet: footerText.slice(0, 200),
       });

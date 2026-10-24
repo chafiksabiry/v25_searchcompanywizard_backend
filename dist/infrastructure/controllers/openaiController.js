@@ -122,6 +122,22 @@ function keyHint(key) {
         return 'too_short';
     return `…${trimmed.slice(-4)}`;
 }
+function brandHost(hostname) {
+    return String(hostname || '').replace(/^www\./i, '').toLowerCase();
+}
+function clearbitLogoUrl(hostname) {
+    return `https://logo.clearbit.com/${brandHost(hostname)}`;
+}
+/** Campaign / social share images — not a company mark, often CORS-blocked. */
+function isUnreliableLogoUrl(url) {
+    const u = String(url || '').toLowerCase();
+    return /cdninstagram|instagram\.com|fbcdn\.|facebook\.com\/.+\/(p|photos?|picture)|pbs\.twimg|tiktokcdn|s24\.fr|bdi\.dlpdomain/i.test(u);
+}
+function looksLikeLogoAsset(url) {
+    if (!url || isUnreliableLogoUrl(url))
+        return false;
+    return /\/logo\b|logo[-_.]|favicon|apple-touch-icon|icon[-_.]|\.(svg|ico)(\?|$)/i.test(url);
+}
 /** Normalize AI bilingual (or legacy string) text → plain (UI lang) + {en,fr}. */
 function asI18nText(raw, preferred = 'fr') {
     if (raw == null)
@@ -297,7 +313,7 @@ class OpenAIController {
                     return null;
                 try {
                     const host = new URL(/^https?:\/\//i.test(companyWebsite) ? companyWebsite : `https://${companyWebsite}`).hostname;
-                    return host ? `https://logo.clearbit.com/${host}` : null;
+                    return host ? clearbitLogoUrl(host) : null;
                 }
                 catch {
                     return null;
@@ -364,7 +380,7 @@ class OpenAIController {
             if (website) {
                 try {
                     const host = new URL(/^https?:\/\//i.test(website) ? website : `https://${website}`).hostname;
-                    logoUrl = host ? `https://logo.clearbit.com/${host}` : null;
+                    logoUrl = host ? clearbitLogoUrl(host) : null;
                 }
                 catch { /* ignore */ }
             }
@@ -907,6 +923,54 @@ class OpenAIController {
         }
         return undefined;
     }
+    resolvePageUrl(raw, pageUrl) {
+        try {
+            return new URL(raw.trim(), pageUrl).toString();
+        }
+        catch {
+            return undefined;
+        }
+    }
+    /** Prefer favicons / logo assets over og:image campaign photos. */
+    extractLogoFromHtml(html, pageUrl) {
+        const scored = [];
+        const push = (raw, score) => {
+            if (!raw)
+                return;
+            const abs = this.resolvePageUrl(raw, pageUrl);
+            if (!abs || isUnreliableLogoUrl(abs))
+                return;
+            scored.push({ url: abs, score: looksLikeLogoAsset(abs) ? score + 15 : score });
+        };
+        const linkTags = html.match(/<link\b[^>]*>/gi) || [];
+        for (const tag of linkTags) {
+            const rel = tag.match(/\brel=["']([^"']+)["']/i)?.[1] || '';
+            const href = tag.match(/\bhref=["']([^"']+)["']/i)?.[1];
+            if (/apple-touch-icon/i.test(rel))
+                push(href, 60);
+            else if (/\bicon\b/i.test(rel))
+                push(href, 50);
+        }
+        const imgTags = html.match(/<img\b[^>]*>/gi) || [];
+        for (const tag of imgTags.slice(0, 40)) {
+            const src = tag.match(/\bsrc=["']([^"']+)["']/i)?.[1];
+            const alt = tag.match(/\balt=["']([^"']+)["']/i)?.[1] || '';
+            if (src && /logo/i.test(`${src} ${alt}`))
+                push(src, 35);
+        }
+        scored.sort((a, b) => b.score - a.score);
+        return scored[0]?.url;
+    }
+    pickCompanyLogo(opts) {
+        if (opts.provided && !isUnreliableLogoUrl(opts.provided) && looksLikeLogoAsset(opts.provided)) {
+            return opts.provided;
+        }
+        if (opts.extracted)
+            return opts.extracted;
+        if (opts.ogImage && looksLikeLogoAsset(opts.ogImage))
+            return opts.ogImage;
+        return clearbitLogoUrl(opts.hostname);
+    }
     extractTextFromHtml(html, maxChars = 20000) {
         const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
         const title = titleMatch ? titleMatch[1].trim() : '';
@@ -1064,13 +1128,20 @@ class OpenAIController {
                     // ignore unreachable sub pages
                 }
             }
-            const inferredLogo = logoUrl || ogImage || `https://logo.clearbit.com/${parsed.hostname}`;
+            const extractedLogo = this.extractLogoFromHtml(html, normalizedUrl);
+            const inferredLogo = this.pickCompanyLogo({
+                provided: typeof logoUrl === 'string' ? logoUrl : undefined,
+                extracted: extractedLogo,
+                ogImage,
+                hostname: parsed.hostname,
+            });
             console.log('🔎 [Scrape] Extracted data:', {
                 phones: contactData.phones,
                 emails: contactData.emails,
                 address: contactData.address,
                 social: contactData.socialMedia,
                 founded: foundedYear,
+                logo: inferredLogo,
                 subPages: subPageTexts.map((s) => s.url),
                 footerSnippet: footerText.slice(0, 200),
             });
