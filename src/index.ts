@@ -9,6 +9,7 @@ import { companyRoutes } from './infrastructure/routes/companyRoutes';
 import { onboardingProgressRoutes } from './infrastructure/routes/onboardingProgressRoutes';
 import { openaiRoutes } from './infrastructure/routes/openaiRoutes';
 import { uploadsRoutes } from './infrastructure/routes/uploadsRoutes';
+import { verificationRoutes } from './infrastructure/routes/verificationRoutes';
 // import { userRoutes } from './infrastructure/routes/userRoutes';
 
 import { Request, Response } from 'express';
@@ -57,6 +58,7 @@ app.use('/api/companies', companyRoutes);
 app.use('/api/openai', openaiRoutes);
 app.use('/api/onboarding', onboardingProgressRoutes);
 app.use('/api/uploads', uploadsRoutes);
+app.use('/api/verification', verificationRoutes);
 
 // Start server
 const startServer = () => {

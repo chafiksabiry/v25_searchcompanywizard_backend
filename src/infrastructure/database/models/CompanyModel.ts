@@ -67,7 +67,8 @@ const companySchema = new mongoose.Schema({
     facebook: String,
     instagram: String
   },
-  differentiators: [String]
+  differentiators: [String],
+  kybVerified: { type: Boolean, default: false }
 }, {
   timestamps: true
 });
