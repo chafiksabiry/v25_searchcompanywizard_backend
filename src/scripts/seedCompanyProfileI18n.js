@@ -14,9 +14,11 @@ const OpenAI = require('openai');
 
 require('dotenv').config();
 
-const MONGODB_URI =
-  process.env.MONGODB_URI ||
-  'mongodb://mongo:DiGaBWUZXCkIxlZMuntztBaFJcOlUJIg@maglev.proxy.rlwy.net:40270/harx?authSource=admin';
+const MONGODB_URI = process.env.MONGODB_URI;
+if (!MONGODB_URI) {
+  console.error('MONGODB_URI environment variable is required (set it in your shell, never in the code).');
+  process.exit(1);
+}
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const DRY_RUN = String(process.env.DRY_RUN || '') === '1';
 const LIMIT = Number(process.env.LIMIT || 0) || 0;

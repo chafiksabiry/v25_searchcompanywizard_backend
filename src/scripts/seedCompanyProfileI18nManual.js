@@ -4,9 +4,11 @@
  */
 const mongoose = require('mongoose');
 
-const URI =
-  process.env.MONGODB_URI ||
-  'mongodb://mongo:DiGaBWUZXCkIxlZMuntztBaFJcOlUJIg@maglev.proxy.rlwy.net:40270/harx?authSource=admin';
+const URI = process.env.MONGODB_URI;
+if (!URI) {
+  console.error('MONGODB_URI environment variable is required (set it in your shell, never in the code).');
+  process.exit(1);
+}
 
 const patches = {
   '6a47eb926505cd50af513257': {
